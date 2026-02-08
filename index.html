@@ -434,6 +434,26 @@ let display = src.clone();
     scale
   };
 }
+function handleFiles(files) {
+  for (const file of files) {
+    const img = new Image();
+
+    img.onload = () => {
+      images.push({
+        name: file.name,
+        img: img
+      });
+
+      if (currentIndex === -1) {
+        selectImage(0);
+      } else {
+        renderList();
+      }
+    };
+
+    img.src = URL.createObjectURL(file);
+  }
+}
 
 </script>
 </body>
