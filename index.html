@@ -7,6 +7,9 @@
 <!-- OpenCV -->
 <script src="https://cdn.jsdelivr.net/npm/opencv.js@1.2.1/opencv.min.js"></script>
 <script>
+  const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
 let cvReady = false;
 cv.onRuntimeInitialized = () => {
   cvReady = true;
@@ -141,6 +144,25 @@ kernel.delete();
   circles.delete();
   return wells;
 }
+  function drawImage() {
+  const img = images[currentIndex].img;
+
+  const maxW = 900;
+  const maxH = 700;
+
+  const scale = Math.min(
+    maxW / img.width,
+    maxH / img.height,
+    1
+  );
+
+  canvas.width = img.width * scale;
+  canvas.height = img.height * scale;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+}
+
 function detectWellsFromCanvas(canvas) {
   const src = cv.imread(canvas);
 
@@ -179,21 +201,17 @@ function detectWellsFromCanvas(canvas) {
 function analyzeColonies() {
   if (!cvReady) return;
 
-  const src = cv.imread(canvas);
-
-  // 全白测试图
-  let white = new cv.Mat(
-    src.rows,
-    src.cols,
+  const white = new cv.Mat(
+    canvas.height,
+    canvas.width,
     cv.CV_8UC4,
     new cv.Scalar(255, 255, 255, 255)
   );
 
   cv.imshow(canvas, white);
-
-  src.delete();
   white.delete();
 }
+
 
 
 </script>
