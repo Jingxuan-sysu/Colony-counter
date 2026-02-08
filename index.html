@@ -8,11 +8,12 @@
 
 
 <script src="https://docs.opencv.org/4.x/opencv.js"></script>
+<script>
   let cvReady = false;
-  cv['onRuntimeInitialized'] = () => {
-  cvReady = true;
-  console.log('OpenCV is ready');
-};
+  cv.onRuntimeInitialized = () => {
+    cvReady = true;
+    console.log('OpenCV is ready');
+  };
 
   <style>
     body {
@@ -143,8 +144,7 @@
       </div>
     </div>
   </div>
-console.log('Safari console test OK');
-  <script>
+
     const fileInput = document.getElementById('fileInput');
     const imageListEl = document.getElementById('imageList');
     const canvas = document.getElementById('canvas');
@@ -163,7 +163,11 @@ console.log('Safari console test OK');
       files.forEach((file, index) => {
         const img = new Image();
         img.onload = () => {
-          images[index] = img;
+     images.push({
+  name: file.name,
+  img: img
+});
+
           // 占位计数（后续替换为真实算法）
           results[index] = {
             name: file.name,
@@ -375,13 +379,6 @@ let display = src.clone();
   document.getElementById('fusionCount').textContent = fusion;
   document.getElementById('totalCount').textContent = single + fusion;
 
-  src.delete(); display.delete();
-}
-
-
-  // 形态学处理
-  let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5));
-  cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel);
 
   // 找轮廓
   let contours = new cv.MatVector();
@@ -419,15 +416,7 @@ let display = src.clone();
   src.delete(); gray.delete(); blur.delete();
   binary.delete(); contours.delete(); hierarchy.delete(); kernel.delete();
 }
-    function getAnalysisMat() {
-  const img = images[currentIndex].img;
-
-  const maxSize = 1200;
-  const scale = Math.min(
-    maxSize / img.width,
-    maxSize / img.height,
-    1
-  );
+ 
 
   const tempCanvas = document.createElement('canvas');
   tempCanvas.width = img.width * scale;
