@@ -85,9 +85,36 @@ function loadImage(e) {
 
 /* ================= 核心分析 ================= */
   function detectWellsFromSrc(src) {
-  let gray = new cv.Mat();
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-  cv.GaussianBlur(gray, gray, new cv.Size(9, 9), 2);
+  let hsv = new cv.Mat();
+let maskPurple = new cv.Mat();
+let binary = new cv.Mat();
+
+// RGBA → HSV
+cv.cvtColor(src, hsv, cv.COLOR_RGBA2HSV);
+
+// 结晶紫 / 甲基紫的大致范围（保守）
+let lower = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [120, 40, 40, 0]);
+let upper = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [160, 255, 255, 255]);
+
+cv.inRange(hsv, lower, upper, maskPurple);
+
+// 只保留当前孔
+cv.bitwise_and(maskPurple, mask, binary);
+
+// 形态学闭运算（填充克隆）
+let kernel = cv.getStructuringElement(
+  cv.MORPH_ELLIPSE,
+  new cv.Size(5, 5)
+);
+cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel);
+
+// 清理
+hsv.delete();
+maskPurple.delete();
+lower.delete();
+upper.delete();
+kernel.delete();
+
 
   let circles = new cv.Mat();
   cv.HoughCircles(
