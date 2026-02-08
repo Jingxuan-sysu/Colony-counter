@@ -191,13 +191,26 @@ console.log('Safari console test OK');
     }
 
     function drawImage() {
-      const img = images[currentIndex];
-      if (!img) return;
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
-    }
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const img = images[currentIndex].img;
+
+  const maxW = 900;
+  const maxH = 700;
+
+  const scale = Math.min(
+    maxW / img.width,
+    maxH / img.height,
+    1
+  );
+
+  canvas.width = img.width * scale;
+  canvas.height = img.height * scale;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+}
+
 
     function updateResult() {
       const r = results[currentIndex];
@@ -253,13 +266,35 @@ console.log('Safari console test OK');
   src.delete(); gray.delete(); circles.delete();
   return wells;
 }
+function getAnalysisMat() {
+  const img = images[currentIndex].img;
+
+  const maxSize = 1200; // 分析最大边
+  const scale = Math.min(
+    maxSize / img.width,
+    maxSize / img.height,
+    1
+  );
+
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = img.width * scale;
+  tempCanvas.height = img.height * scale;
+
+  const ctx = tempCanvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
+
+  return {
+    mat: cv.imread(tempCanvas),
+    scale
+  };
+}
 
 function analyzeColonies() {
   if (!cv || !cv.Mat) return;
+const { mat: src, scale } = getAnalysisMat();
+let display = src.clone();
 
-  drawImage(); // 确保 canvas 有图
 
-  const src = cv.imread(canvas);
   let display = src.clone();
 
   const wells = detectWells();
@@ -377,6 +412,29 @@ function analyzeColonies() {
   src.delete(); gray.delete(); blur.delete();
   binary.delete(); contours.delete(); hierarchy.delete(); kernel.delete();
 }
+    function getAnalysisMat() {
+  const img = images[currentIndex].img;
+
+  const maxSize = 1200;
+  const scale = Math.min(
+    maxSize / img.width,
+    maxSize / img.height,
+    1
+  );
+
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = img.width * scale;
+  tempCanvas.height = img.height * scale;
+
+  const ctx = tempCanvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
+
+  return {
+    mat: cv.imread(tempCanvas),
+    scale
+  };
+}
+
 </script>
 </body>
 </html>
