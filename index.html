@@ -1,456 +1,157 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <title>Colony Counter</title>
+<meta charset="UTF-8">
+<title>Colony Counter v1.0</title>
 
-  <!-- Excel 导出库 -->
-
-
+<!-- OpenCV -->
 <script src="https://docs.opencv.org/4.x/opencv.js"></script>
 <script>
-  let cvReady = false;
-  cv.onRuntimeInitialized = () => {
-    cvReady = true;
-    console.log('OpenCV is ready');
-  };
+let cvReady = false;
+cv.onRuntimeInitialized = () => {
+  cvReady = true;
+  console.log("OpenCV ready");
+};
+</script>
 
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      font-family: Arial, "Microsoft YaHei", sans-serif;
-      background: #f7fbff;
-      color: #333;
-    }
-
-    header {
-      padding: 16px 24px;
-      background: linear-gradient(90deg, #dbeeff, #ffe9f1);
-      font-size: 20px;
-      font-weight: bold;
-    }
-
-    .container {
-      display: flex;
-      height: calc(100vh - 60px);
-    }
-
-    .sidebar {
-      width: 220px;
-      background: #ffffff;
-      border-right: 1px solid #eee;
-      padding: 12px;
-      box-sizing: border-box;
-    }
-
-    .sidebar h3 {
-      font-size: 14px;
-      margin: 8px 0;
-    }
-
-    .image-list {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      max-height: 70vh;
-      overflow-y: auto;
-    }
-
-    .image-list li {
-      padding: 6px 8px;
-      margin-bottom: 4px;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-
-    .image-list li.active {
-      background: #e6f2ff;
-      font-weight: bold;
-    }
-
-    .main {
-      flex: 1;
-      padding: 16px;
-      box-sizing: border-box;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .toolbar {
-      margin-bottom: 12px;
-    }
-
-    button {
-      padding: 8px 14px;
-      margin-right: 8px;
-      border: none;
-      border-radius: 8px;
-      background: #cfe5ff;
-      cursor: pointer;
-      font-size: 14px;
-    }
-
-    button:hover {
-      background: #b8d8ff;
-    }
-
-    canvas {
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-      max-width: 100%;
-      max-height: 60vh;
-    }
-
-    .result-panel {
-      margin-top: 12px;
-      background: #ffffff;
-      border-radius: 12px;
-      padding: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    }
-
-    .result-panel p {
-      margin: 6px 0;
-    }
-  </style>
-
+<style>
+body {
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  background: #f7fbff;
+  padding: 24px;
+}
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 900px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+canvas {
+  max-width: 100%;
+  border: 1px solid #ddd;
+  margin-top: 12px;
+}
+.controls {
+  margin-top: 12px;
+}
+</style>
 </head>
 
 <body>
-  <header>Colony Counter · 细胞克隆形成计数工具</header>
+<div class="card">
+  <h1>Colony Counter</h1>
+  <p>细胞克隆形成实验 · 半自动计数工具（v1.0）</p>
 
-  <div class="container">
-    <!-- 左侧图片列表 -->
-    <div class="sidebar">
-      <h3>图片列表</h3>
-      <ul class="image-list" id="imageList"></ul>
-    </div>
-
-    <!-- 主区域 -->
-    <div class="main">
-      <div class="toolbar">
-        <input type="file" id="fileInput" multiple accept="image/*" />
-        <button onclick="exportExcel()">批量导出 Excel</button>
-      </div>
-
-      <canvas id="canvas"></canvas>
-
-      <div class="result-panel">
-        <p>单克隆数：<span id="singleCount">0</span></p>
-        <p>融合集落：<span id="fusionCount">0</span></p>
-        <p><strong>总计：<span id="totalCount">0</span></strong></p>
-      </div>
-    </div>
+  <input type="file" accept="image/*" onchange="loadImage(event)">
+  <div class="controls">
+    <button onclick="analyzeColonies()">分析克隆</button>
   </div>
 
-    const fileInput = document.getElementById('fileInput');
-    const imageListEl = document.getElementById('imageList');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
+  <canvas id="canvas"></canvas>
+  <p id="result"></p>
+</div>
 
-    let images = [];
-    let results = [];
-    let currentIndex = -1;
+<script>
+/* ================= 全局状态 ================= */
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
 
-    fileInput.addEventListener('change', (e) => {
-      const files = Array.from(e.target.files);
-      images = [];
-      results = [];
-      imageListEl.innerHTML = '';
+let imageData = null;   // Image 对象
+let srcMat = null;     // OpenCV Mat（只创建一次）
 
-      files.forEach((file, index) => {
-        const img = new Image();
-        img.onload = () => {
-     images.push({
-  name: file.name,
-  img: img
-});
+/* ================= 图片加载 ================= */
+function loadImage(e) {
+  const file = e.target.files[0];
+  if (!file) return;
 
-          // 占位计数（后续替换为真实算法）
-          results[index] = {
-            name: file.name,
-            single: Math.floor(Math.random() * 50),
-            fusion: Math.floor(Math.random() * 10)
-          };
-          renderList();
-          if (currentIndex === -1) selectImage(0);
-        };
-        img.src = URL.createObjectURL(file);
-      });
-    });
+  const img = new Image();
+  img.onload = () => {
+    imageData = img;
 
-    function renderList() {
-      imageListEl.innerHTML = '';
-      images.forEach((_, i) => {
-        const li = document.createElement('li');
-        li.textContent = results[i].name;
-        li.className = i === currentIndex ? 'active' : '';
-        li.onclick = () => selectImage(i);
-        imageListEl.appendChild(li);
-      });
-    }
+    // 原始尺寸绘制，不拉伸
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    ctx.drawImage(img, 0, 0);
 
-    function selectImage(index) {
-      currentIndex = index;
-      renderList();
-      drawImage();
-      updateResult();
-      analyzeColonies();
+    // 释放旧 Mat
+    if (srcMat) srcMat.delete();
+    srcMat = cv.imread(canvas);
 
-    }
-
-    function drawImage() {
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
-  const img = images[currentIndex].img;
-
-  const maxW = 900;
-  const maxH = 700;
-
-  const scale = Math.min(
-    maxW / img.width,
-    maxH / img.height,
-    1
-  );
-
-  canvas.width = img.width * scale;
-  canvas.height = img.height * scale;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-}
-
-
-    function updateResult() {
-      const r = results[currentIndex];
-      document.getElementById('singleCount').textContent = r.single;
-      document.getElementById('fusionCount').textContent = r.fusion;
-      document.getElementById('totalCount').textContent = r.single + r.fusion;
-    }
-
-    function exportExcel() {
-      const data = results.map(r => ({
-        图片名: r.name,
-        单克隆数: r.single,
-        融合集落数: r.fusion,
-        总计: r.single + r.fusion
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(data);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Colony Count');
-
-      XLSX.writeFile(wb, 'Colony_Count_Result.xlsx');
-    }
- function detectWells() {
-  const src = cv.imread(canvas);
-  let gray = new cv.Mat();
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-  cv.GaussianBlur(gray, gray, new cv.Size(9, 9), 1.5);
-
-  let circles = new cv.Mat();
-  let minR = Math.floor(canvas.width * 0.12);
-  let maxR = Math.floor(canvas.width * 0.35);
-
-  cv.HoughCircles(
-    gray,
-    circles,
-    cv.HOUGH_GRADIENT,
-    1,
-    minR * 1.2,
-    100,
-    30,
-    minR,
-    maxR
-  );
-
-  let wells = [];
-  for (let i = 0; i < circles.cols; i++) {
-    let x = circles.data32F[i * 3];
-    let y = circles.data32F[i * 3 + 1];
-    let r = circles.data32F[i * 3 + 2];
-    wells.push({ x, y, r });
-  }
-
-  src.delete(); gray.delete(); circles.delete();
-  return wells;
-}
-function getAnalysisMat() {
-  const img = images[currentIndex].img;
-
-  const maxSize = 1200; // 分析最大边
-  const scale = Math.min(
-    maxSize / img.width,
-    maxSize / img.height,
-    1
-  );
-
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = img.width * scale;
-  tempCanvas.height = img.height * scale;
-
-  const ctx = tempCanvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
-
-  return {
-    mat: cv.imread(tempCanvas),
-    scale
+    document.getElementById("result").innerText = "图片加载完成";
   };
+  img.src = URL.createObjectURL(file);
 }
 
+/* ================= 核心分析 ================= */
 function analyzeColonies() {
-  if (!cvReady) {
-    console.warn('OpenCV not ready yet');
+  if (!cvReady || !srcMat) {
+    alert("OpenCV 或图片尚未准备好");
     return;
   }
-const { mat: src, scale } = getAnalysisMat();
-let display = src.clone();
 
-  const wells = detectWells();
+  let src = srcMat.clone();
+  let display = src.clone();
 
-  let single = 0;
-  let fusion = 0;
+  // 灰度 + 平滑
+  let gray = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
 
-  wells.forEach(well => {
-    // 创建孔 mask
-    let mask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
-    cv.circle(
-      mask,
-      new cv.Point(well.x, well.y),
-      well.r * 0.95,
-      new cv.Scalar(255),
-      -1
-    );
+  // 自适应阈值（适合紫色克隆）
+  let bin = new cv.Mat();
+  cv.adaptiveThreshold(
+    gray, bin,
+    255,
+    cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+    cv.THRESH_BINARY_INV,
+    51, 5
+  );
 
-    // 灰度 + 二值
-    let gray = new cv.Mat();
-    let blur = new cv.Mat();
-    let binary = new cv.Mat();
-
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
-    cv.threshold(
-      blur,
-      binary,
-      0,
-      255,
-      cv.THRESH_BINARY_INV + cv.THRESH_OTSU
-    );
-
-    cv.bitwise_and(binary, mask, binary);
-
-    let contours = new cv.MatVector();
-    let hierarchy = new cv.Mat();
-    cv.findContours(
-      binary,
-      contours,
-      hierarchy,
-      cv.RETR_EXTERNAL,
-      cv.CHAIN_APPROX_SIMPLE
-    );
-
-    for (let i = 0; i < contours.size(); i++) {
-      let cnt = contours.get(i);
-      let area = cv.contourArea(cnt);
-      let peri = cv.arcLength(cnt, true);
-      if (peri === 0 || area < 50) continue;
-
-      let circ = 4 * Math.PI * area / (peri * peri);
-
-      if (circ >= 0.75) {
-        single++;
-        cv.drawContours(display, contours, i, new cv.Scalar(0,255,0,255), 2);
-      } else {
-        fusion++;
-        cv.drawContours(display, contours, i, new cv.Scalar(255,0,0,255), 2);
-      }
-    }
-
-    // 清理
-    mask.delete(); gray.delete(); blur.delete();
-    binary.delete(); contours.delete(); hierarchy.delete();
-  });
-
-  cv.imshow(canvas, display);
-
-  document.getElementById('singleCount').textContent = single;
-  document.getElementById('fusionCount').textContent = fusion;
-  document.getElementById('totalCount').textContent = single + fusion;
-
+  // 形态学去噪
+  let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
+  cv.morphologyEx(bin, bin, cv.MORPH_OPEN, kernel);
 
   // 找轮廓
   let contours = new cv.MatVector();
   let hierarchy = new cv.Mat();
-  cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+  cv.findContours(bin, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
   let single = 0;
   let fusion = 0;
 
   for (let i = 0; i < contours.size(); i++) {
-    let cnt = contours.get(i);
-    let area = cv.contourArea(cnt);
-    let perimeter = cv.arcLength(cnt, true);
+    const cnt = contours.get(i);
+    const area = cv.contourArea(cnt);
 
-    if (perimeter === 0) continue;
+    if (area < 80) {
+      cnt.delete();
+      continue;
+    }
 
-    let circularity = 4 * Math.PI * area / (perimeter * perimeter);
-
-    if (area > 100 && circularity >= 0.75) {
+    let color;
+    if (area < 800) {
       single++;
-      cv.drawContours(src, contours, i, new cv.Scalar(0, 255, 0, 255), 2);
+      color = new cv.Scalar(0, 255, 0, 255); // 绿色：单克隆
     } else {
       fusion++;
-      cv.drawContours(src, contours, i, new cv.Scalar(255, 0, 0, 255), 2);
+      color = new cv.Scalar(255, 0, 0, 255); // 红色：融合
     }
+
+    cv.drawContours(display, contours, i, color, 2);
+    cnt.delete();
   }
 
-  cv.imshow(canvas, src);
+  cv.imshow(canvas, display);
 
-  // 更新结果
-  document.getElementById('singleCount').textContent = single;
-  document.getElementById('fusionCount').textContent = fusion;
-  document.getElementById('totalCount').textContent = single + fusion;
+  document.getElementById("result").innerText =
+    `单克隆：${single}    融合克隆：${fusion}`;
 
-  src.delete(); gray.delete(); blur.delete();
-  binary.delete(); contours.delete(); hierarchy.delete(); kernel.delete();
+  // 清理
+  gray.delete(); bin.delete(); kernel.delete();
+  contours.delete(); hierarchy.delete();
+  src.delete(); display.delete();
 }
- 
-
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = img.width * scale;
-  tempCanvas.height = img.height * scale;
-
-  const ctx = tempCanvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
-
-  return {
-    mat: cv.imread(tempCanvas),
-    scale
-  };
-}
-function handleFiles(files) {
-  for (const file of files) {
-    const img = new Image();
-
-    img.onload = () => {
-      images.push({
-        name: file.name,
-        img: img
-      });
-
-      if (currentIndex === -1) {
-        selectImage(0);
-      } else {
-        renderList();
-      }
-    };
-
-    img.src = URL.createObjectURL(file);
-  }
-}
-
 </script>
 </body>
 </html>
