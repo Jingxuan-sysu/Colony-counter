@@ -107,6 +107,7 @@
       margin: 6px 0;
     }
   </style>
+  <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 </head>
 
 <body>
@@ -185,6 +186,8 @@
       renderList();
       drawImage();
       updateResult();
+      analyzeColonies();
+
     }
 
     function drawImage() {
@@ -218,5 +221,63 @@
       XLSX.writeFile(wb, 'Colony_Count_Result.xlsx');
     }
   </script>
+  <script>
+function analyzeColonies() {
+  const src = cv.imread(canvas);
+  let gray = new cv.Mat();
+  let blur = new cv.Mat();
+  let binary = new cv.Mat();
+
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+  cv.threshold(
+    blur,
+    binary,
+    0,
+    255,
+    cv.THRESH_BINARY_INV + cv.THRESH_OTSU
+  );
+
+  // 形态学处理
+  let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5));
+  cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel);
+
+  // 找轮廓
+  let contours = new cv.MatVector();
+  let hierarchy = new cv.Mat();
+  cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+  let single = 0;
+  let fusion = 0;
+
+  for (let i = 0; i < contours.size(); i++) {
+    let cnt = contours.get(i);
+    let area = cv.contourArea(cnt);
+    let perimeter = cv.arcLength(cnt, true);
+
+    if (perimeter === 0) continue;
+
+    let circularity = 4 * Math.PI * area / (perimeter * perimeter);
+
+    if (area > 100 && circularity >= 0.75) {
+      single++;
+      cv.drawContours(src, contours, i, new cv.Scalar(0, 255, 0, 255), 2);
+    } else {
+      fusion++;
+      cv.drawContours(src, contours, i, new cv.Scalar(255, 0, 0, 255), 2);
+    }
+  }
+
+  cv.imshow(canvas, src);
+
+  // 更新结果
+  document.getElementById('singleCount').textContent = single;
+  document.getElementById('fusionCount').textContent = fusion;
+  document.getElementById('totalCount').textContent = single + fusion;
+
+  src.delete(); gray.delete(); blur.delete();
+  binary.delete(); contours.delete(); hierarchy.delete(); kernel.delete();
+}
+</script>
 </body>
 </html>
