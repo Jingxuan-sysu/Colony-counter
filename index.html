@@ -176,93 +176,35 @@ function detectWellsFromCanvas(canvas) {
 
   return wells;
 }
-
 function analyzeColonies() {
   if (!cvReady) return;
 
   drawImage();
 
   const src = cv.imread(canvas);
-  let display = src.clone();
 
-  const wells = detectWellsFromCanvas(canvas);
-wells.forEach(well => {
-  let mask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+  // 1️⃣ 转 HSV
+  let hsv = new cv.Mat();
+  cv.cvtColor(src, hsv, cv.COLOR_RGBA2HSV);
 
-  cv.circle(
-    mask,
-    new cv.Point(well.x, well.y),
-    well.r * 0.95,
-    new cv.Scalar(255),
-    -1
-  );
+  // 2️⃣ 超宽松紫色范围（调试用）
+  let lower = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [100, 20, 20, 0]);
+  let upper = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [180, 255, 255, 255]);
 
-  // 后面所有 threshold / findContours
-  // 都必须先：
-  cv.bitwise_and(binary, mask, binary);
+  let mask = new cv.Mat();
+  cv.inRange(hsv, lower, upper, mask);
 
-  mask.delete();
-});
-
-  // 灰度 + 平滑
-  let gray = new cv.Mat();
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-  cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
-
-  // 自适应阈值（适合紫色克隆）
-  let bin = new cv.Mat();
-  cv.adaptiveThreshold(
-    gray, bin,
-    255,
-    cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-    cv.THRESH_BINARY_INV,
-    51, 5
-  );
-
-  // 形态学去噪
-  let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
-  cv.morphologyEx(bin, bin, cv.MORPH_OPEN, kernel);
-
-  // 找轮廓
-  let contours = new cv.MatVector();
-  let hierarchy = new cv.Mat();
-  cv.findContours(bin, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-  let single = 0;
-  let fusion = 0;
-
-  for (let i = 0; i < contours.size(); i++) {
-    const cnt = contours.get(i);
-    const area = cv.contourArea(cnt);
-
-    if (area < 80) {
-      cnt.delete();
-      continue;
-    }
-
-    let color;
-    if (area < 800) {
-      single++;
-      color = new cv.Scalar(0, 255, 0, 255); // 绿色：单克隆
-    } else {
-      fusion++;
-      color = new cv.Scalar(255, 0, 0, 255); // 红色：融合
-    }
-
-    cv.drawContours(display, contours, i, color, 2);
-    cnt.delete();
-  }
-
-  cv.imshow(canvas, display);
-
-  document.getElementById("result").innerText =
-    `单克隆：${single}    融合克隆：${fusion}`;
+  // 3️⃣ 直接显示 mask（关键！）
+  cv.imshow(canvas, mask);
 
   // 清理
-  gray.delete(); bin.delete(); kernel.delete();
-  contours.delete(); hierarchy.delete();
-  src.delete(); display.delete();
+  src.delete();
+  hsv.delete();
+  lower.delete();
+  upper.delete();
+  mask.delete();
 }
+
 </script>
 </body>
 </html>
