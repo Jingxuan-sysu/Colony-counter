@@ -84,14 +84,98 @@ function loadImage(e) {
 }
 
 /* ================= 核心分析 ================= */
-function analyzeColonies() {
-  if (!cvReady || !srcMat) {
-    alert("OpenCV 或图片尚未准备好");
-    return;
+  function detectWellsFromSrc(src) {
+  let gray = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray, gray, new cv.Size(9, 9), 2);
+
+  let circles = new cv.Mat();
+  cv.HoughCircles(
+    gray,
+    circles,
+    cv.HOUGH_GRADIENT,
+    1,
+    src.rows / 4,
+    120,
+    40,
+    src.rows * 0.15,
+    src.rows * 0.45
+  );
+
+  let wells = [];
+  for (let i = 0; i < circles.cols; i++) {
+    let x = circles.data32F[i * 3];
+    let y = circles.data32F[i * 3 + 1];
+    let r = circles.data32F[i * 3 + 2];
+    wells.push({ x, y, r });
   }
 
-  let src = srcMat.clone();
+  gray.delete();
+  circles.delete();
+  return wells;
+}
+function detectWellsFromCanvas(canvas) {
+  const src = cv.imread(canvas);
+
+  let gray = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray, gray, new cv.Size(9, 9), 2);
+
+  let circles = new cv.Mat();
+  cv.HoughCircles(
+    gray,
+    circles,
+    cv.HOUGH_GRADIENT,
+    1,
+    src.rows / 4,
+    120,
+    40,
+    src.rows * 0.15,
+    src.rows * 0.45
+  );
+
+  let wells = [];
+  for (let i = 0; i < circles.cols; i++) {
+    wells.push({
+      x: circles.data32F[i * 3],
+      y: circles.data32F[i * 3 + 1],
+      r: circles.data32F[i * 3 + 2]
+    });
+  }
+
+  src.delete();
+  gray.delete();
+  circles.delete();
+
+  return wells;
+}
+
+function analyzeColonies() {
+  if (!cvReady) return;
+
+  drawImage();
+
+  const src = cv.imread(canvas);
   let display = src.clone();
+
+  const wells = detectWellsFromCanvas(canvas);
+wells.forEach(well => {
+  let mask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+
+  cv.circle(
+    mask,
+    new cv.Point(well.x, well.y),
+    well.r * 0.95,
+    new cv.Scalar(255),
+    -1
+  );
+
+  // 后面所有 threshold / findContours
+  // 都必须先：
+  cv.bitwise_and(binary, mask, binary);
+
+  mask.delete();
+});
 
   // 灰度 + 平滑
   let gray = new cv.Mat();
