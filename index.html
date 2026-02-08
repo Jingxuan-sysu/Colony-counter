@@ -117,3 +117,106 @@
     <div class="sidebar">
       <h3>图片列表</h3>
       <ul class="image-list" id="imageList"></ul>
+    </div>
+
+    <!-- 主区域 -->
+    <div class="main">
+      <div class="toolbar">
+        <input type="file" id="fileInput" multiple accept="image/*" />
+        <button onclick="exportExcel()">批量导出 Excel</button>
+      </div>
+
+      <canvas id="canvas"></canvas>
+
+      <div class="result-panel">
+        <p>单克隆数：<span id="singleCount">0</span></p>
+        <p>融合集落：<span id="fusionCount">0</span></p>
+        <p><strong>总计：<span id="totalCount">0</span></strong></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const imageListEl = document.getElementById('imageList');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    let images = [];
+    let results = [];
+    let currentIndex = -1;
+
+    fileInput.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files);
+      images = [];
+      results = [];
+      imageListEl.innerHTML = '';
+
+      files.forEach((file, index) => {
+        const img = new Image();
+        img.onload = () => {
+          images[index] = img;
+          // 占位计数（后续替换为真实算法）
+          results[index] = {
+            name: file.name,
+            single: Math.floor(Math.random() * 50),
+            fusion: Math.floor(Math.random() * 10)
+          };
+          renderList();
+          if (currentIndex === -1) selectImage(0);
+        };
+        img.src = URL.createObjectURL(file);
+      });
+    });
+
+    function renderList() {
+      imageListEl.innerHTML = '';
+      images.forEach((_, i) => {
+        const li = document.createElement('li');
+        li.textContent = results[i].name;
+        li.className = i === currentIndex ? 'active' : '';
+        li.onclick = () => selectImage(i);
+        imageListEl.appendChild(li);
+      });
+    }
+
+    function selectImage(index) {
+      currentIndex = index;
+      renderList();
+      drawImage();
+      updateResult();
+    }
+
+    function drawImage() {
+      const img = images[currentIndex];
+      if (!img) return;
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+    }
+
+    function updateResult() {
+      const r = results[currentIndex];
+      document.getElementById('singleCount').textContent = r.single;
+      document.getElementById('fusionCount').textContent = r.fusion;
+      document.getElementById('totalCount').textContent = r.single + r.fusion;
+    }
+
+    function exportExcel() {
+      const data = results.map(r => ({
+        图片名: r.name,
+        单克隆数: r.single,
+        融合集落数: r.fusion,
+        总计: r.single + r.fusion
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Colony Count');
+
+      XLSX.writeFile(wb, 'Colony_Count_Result.xlsx');
+    }
+  </script>
+</body>
+</html>
