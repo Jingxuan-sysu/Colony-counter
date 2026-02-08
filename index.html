@@ -90,7 +90,7 @@ let maskPurple = new cv.Mat();
 let binary = new cv.Mat();
 
 // RGBA → HSV
-cv.cvtColor(src, hsv, cv.COLOR_RGBA2HSV);
+cv.cvtColor(src, hsv, cv.COLOR_RGBA2HSV_FULL);
 
 // 结晶紫 / 甲基紫的大致范围（保守）
 let lower = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [120, 40, 40, 0]);
