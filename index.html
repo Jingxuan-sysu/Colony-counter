@@ -2,139 +2,177 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>细胞克隆自动计数工具 (纯前端版)</title>
-    <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ColonyCounter AI - 纯前端细胞克隆计数</title>
+    <script async src="https://docs.opencv.org/4.5.4/opencv.js" type="text/javascript"></script>
     <style>
-        body { font-family: sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; background: #f4f7f6; }
-        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-        canvas { max-width: 100%; height: auto; border: 1px solid #ddd; margin-top: 10px; }
-        .res-info { background: #e7f3ff; padding: 15px; border-radius: 5px; margin-top: 10px; font-weight: bold; color: #0056b3; }
-        .loading { color: red; font-weight: bold; }
+        :root { --primary: #2c3e50; --accent: #3498db; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: var(--primary); margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        header { text-align: center; border-bottom: 2px solid #eee; margin-bottom: 20px; padding-bottom: 10px; }
+        
+        .upload-section { border: 2px dashed #ccc; padding: 40px; text-align: center; border-radius: 10px; transition: 0.3s; cursor: pointer; background: #fafafa; }
+        .upload-section:hover { border-color: var(--accent); background: #f1f9ff; }
+        #fileInput { display: none; }
+
+        .dashboard { display: grid; grid-template-columns: 300px 1fr; gap: 30px; margin-top: 20px; }
+        .controls { background: #f8f9fa; padding: 20px; border-radius: 8px; height: fit-content; }
+        .control-group { margin-bottom: 20px; }
+        label { display: block; font-size: 0.9rem; font-weight: bold; margin-bottom: 8px; }
+        input[type="range"] { width: 100%; cursor: pointer; }
+        
+        .display-area { display: flex; flex-direction: column; gap: 20px; }
+        .canvas-container { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        canvas { width: 100%; border-radius: 4px; background: #000; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+        
+        .stats-card { background: var(--primary); color: white; padding: 15px; border-radius: 8px; text-align: center; font-size: 1.2rem; }
+        #status { font-weight: bold; color: #e67e22; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>🧫 细胞克隆自动计数工具</h2>
-    <p id="status" class="loading">正在加载 OpenCV.js (约 10MB)，请稍候...</p>
-    
-    <div class="controls">
-        <div>
-            <label>1. 选择图片：</label><br>
-            <input type="file" id="fileInput" accept="image/*">
-        </div>
-        <div>
-            <label>2. 调整阈值 (灵敏度)：</label>
-            <input type="range" id="thresholdRange" min="0" max="255" value="120">
-            <span id="threshVal">120</span>
-        </div>
+    <header>
+        <h1>🔬 细胞克隆自动计数系统</h1>
+        <p id="status">正在加载核心算法库，请稍候...</p>
+    </header>
+
+    <div class="upload-section" onclick="document.getElementById('fileInput').click()">
+        <h3>点击或拖拽图片到此处上传</h3>
+        <p>支持 JPG, PNG 格式的培养皿照片</p>
+        <input type="file" id="fileInput" accept="image/*">
     </div>
 
-    <div class="res-info" id="resultText">待上传图片...</div>
-
-    <div style="display: flex; gap: 10px;">
-        <div>
-            <h4>原始图片</h4>
-            <canvas id="canvasInput"></canvas>
+    <div class="dashboard">
+        <div class="controls">
+            <div class="stats-card">
+                计数结果：<span id="counter">0</span>
+            </div>
+            <hr>
+            <div class="control-group">
+                <label>识别灵敏度 (阈值): <span id="v_thresh">120</span></label>
+                <input type="range" id="threshold" min="0" max="255" value="120">
+            </div>
+            <div class="control-group">
+                <label>过滤微小杂质 (面积): <span id="v_area">50</span></label>
+                <input type="range" id="minArea" min="5" max="1000" value="50">
+            </div>
+            <p style="font-size: 0.8rem; color: #666;">* 调整滑块后结果会自动更新</p>
+            <button onclick="downloadResult()" style="width: 100%; padding: 10px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer;">下载统计图</button>
         </div>
-        <div>
-            <h4>处理结果 (识别结果)</h4>
-            <canvas id="canvasOutput"></canvas>
+
+        <div class="display-area">
+            <div class="canvas-container">
+                <div>
+                    <label>原始输入</label>
+                    <canvas id="canvasInput"></canvas>
+                </div>
+                <div>
+                    <label>识别结果 (绿色标记)</label>
+                    <canvas id="canvasOutput"></canvas>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
-<script type="text/javascript">
-let imgElement = document.getElementById('canvasInput');
-let inputElement = document.getElementById('fileInput');
-let threshSlider = document.getElementById('thresholdRange');
+<script>
+let srcImg = null;
 
-// 当OpenCV准备就绪
-var cvReady = false;
+// 1. OpenCV 加载状态监控
 function onOpenCvReady() {
-    document.getElementById('status').innerHTML = "✅ OpenCV.js 已就绪，请上传照片";
-    document.getElementById('status').style.color = "green";
-    cvReady = true;
+    document.getElementById('status').innerText = "✅ 系统就绪，请上传实验图片";
+    document.getElementById('status').style.color = "#27ae60";
 }
 
-// 图片加载处理
-inputElement.addEventListener('change', (e) => {
-    let reader = new FileReader();
-    reader.onload = (event) => {
-        let img = new Image();
-        img.onload = () => {
-            let canvas = document.getElementById('canvasInput');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            let ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            processImage();
-        };
-        img.src = event.target.result;
+// 2. 导入图片功能实现
+const fileInput = document.getElementById('fileInput');
+fileInput.onchange = (e) => {
+    if (e.target.files.length === 0) return;
+    const url = URL.createObjectURL(e.target.files[0]);
+    const img = new Image();
+    img.onload = () => {
+        const ctx = document.getElementById('canvasInput').getContext('2d');
+        document.getElementById('canvasInput').width = img.width;
+        document.getElementById('canvasInput').height = img.height;
+        ctx.drawImage(img, 0, 0);
+        
+        // 将图片读入 OpenCV 内存
+        if (srcImg) srcImg.delete();
+        srcImg = cv.imread('canvasInput');
+        processImage(); // 导入后立即分析
     };
-    reader.readAsDataURL(e.target.files[0]);
-}, false);
+    img.src = url;
+};
 
-threshSlider.oninput = function() {
-    document.getElementById('threshVal').innerHTML = this.value;
-    if(cvReady) processImage();
-}
-
-// 核心处理算法
+// 3. 实时分析算法
 function processImage() {
-    let src = cv.imread('canvasInput');
-    let dst = new cv.Mat();
+    if (!srcImg) return;
+
+    let dst = srcImg.clone();
     let gray = new cv.Mat();
-    
-    // 1. 灰度化
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-    
-    // 2. 高斯滤波去噪
-    let ksize = new cv.Size(5, 5);
-    cv.GaussianBlur(gray, gray, ksize, 0, 0, cv.BORDER_DEFAULT);
-    
-    // 3. 阈值分割 (这里假设背景亮细胞暗，所以用 INV)
-    let thresh = parseInt(threshSlider.value);
-    cv.threshold(gray, gray, thresh, 255, cv.THRESH_BINARY_INV);
-    
-    // 4. 形态学开运算：去掉噪点
-    let M = cv.Mat.ones(3, 3, cv.CV_8U);
-    cv.morphologyEx(gray, gray, cv.MORPH_OPEN, M);
-    
-    // 5. 查找轮廓
+    let thresh = new cv.Mat();
     let contours = new cv.MatVector();
     let hierarchy = new cv.Mat();
-    cv.findContours(gray, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-    
-    let count = 0;
-    let minArea = 50; // 过滤掉太小的杂质
 
+    // 预处理
+    cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+    
+    // 获取滑块参数
+    const t_val = parseInt(document.getElementById('threshold').value);
+    const a_val = parseInt(document.getElementById('minArea').value);
+    document.getElementById('v_thresh').innerText = t_val;
+    document.getElementById('v_area').innerText = a_val;
+
+    // 二值化 (假设背景亮细胞暗)
+    cv.threshold(gray, thresh, t_val, 255, cv.THRESH_BINARY_INV);
+    
+    // 形态学去噪
+    let M = cv.Mat.ones(3, 3, cv.CV_8U);
+    cv.morphologyEx(thresh, thresh, cv.MORPH_OPEN, M);
+
+    // 寻找克隆轮廓
+    cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    let count = 0;
     for (let i = 0; i < contours.size(); ++i) {
         let cnt = contours.get(i);
         let area = cv.contourArea(cnt);
-        if (area > minArea) {
+        if (area > a_val) {
             count++;
-            // 在原图绘制绿色轮廓
             let color = new cv.Scalar(0, 255, 0, 255);
-            cv.drawContours(src, contours, i, color, 2, cv.LINE_8, hierarchy, 0);
+            cv.drawContours(dst, contours, i, color, 3);
+            
+            // 绘制数字编号
+            let rect = cv.boundingRect(cnt);
+            let point = new cv.Point(rect.x, rect.y);
+            cv.putText(dst, count.toString(), point, cv.FONT_HERSHEY_SIMPLEX, 0.8, [255, 0, 0, 255], 2);
         }
     }
 
-    cv.imshow('canvasOutput', src);
-    document.getElementById('resultText').innerHTML = `检测完成！识别到克隆数：${count}`;
+    cv.imshow('canvasOutput', dst);
+    document.getElementById('counter').innerText = count;
 
-    // 释放内存
-    src.delete(); dst.delete(); gray.delete(); M.delete(); contours.delete(); hierarchy.delete();
+    // 内存清理
+    gray.delete(); thresh.delete(); contours.delete(); hierarchy.delete(); dst.delete(); M.delete();
 }
 
-// 轮询检查OpenCV加载
-let checkCv = setInterval(() => {
-    if (typeof cv !== 'undefined' && cv.getBuildInformation) {
-        onOpenCvReady();
-        clearInterval(checkCv);
-    }
-}, 300);
+// 4. 监听滑块实现实时反馈
+document.getElementById('threshold').oninput = processImage;
+document.getElementById('minArea').oninput = processImage;
+
+// 5. 下载功能
+function downloadResult() {
+    const canvas = document.getElementById('canvasOutput');
+    const link = document.createElement('a');
+    link.download = 'colony-count-result.png';
+    link.href = canvas.toDataURL();
+    link.click();
+}
+
+// 轮询检测 OpenCV 是否加载完成
+var Module = { onRuntimeInitialized: onOpenCvReady };
 </script>
 
 </body>
