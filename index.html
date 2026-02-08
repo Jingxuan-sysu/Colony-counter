@@ -1,32 +1,119 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Colony Counter</title>
+
+  <!-- Excel 导出库 -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
   <style>
     body {
+      margin: 0;
+      padding: 0;
       font-family: Arial, "Microsoft YaHei", sans-serif;
       background: #f7fbff;
-      margin: 0;
-      padding: 40px;
-    }
-    h1 {
       color: #333;
     }
-    .card {
-      background: white;
+
+    header {
+      padding: 16px 24px;
+      background: linear-gradient(90deg, #dbeeff, #ffe9f1);
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .container {
+      display: flex;
+      height: calc(100vh - 60px);
+    }
+
+    .sidebar {
+      width: 220px;
+      background: #ffffff;
+      border-right: 1px solid #eee;
+      padding: 12px;
+      box-sizing: border-box;
+    }
+
+    .sidebar h3 {
+      font-size: 14px;
+      margin: 8px 0;
+    }
+
+    .image-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+    .image-list li {
+      padding: 6px 8px;
+      margin-bottom: 4px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .image-list li.active {
+      background: #e6f2ff;
+      font-weight: bold;
+    }
+
+    .main {
+      flex: 1;
+      padding: 16px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .toolbar {
+      margin-bottom: 12px;
+    }
+
+    button {
+      padding: 8px 14px;
+      margin-right: 8px;
+      border: none;
+      border-radius: 8px;
+      background: #cfe5ff;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button:hover {
+      background: #b8d8ff;
+    }
+
+    canvas {
+      background: #fff;
       border-radius: 12px;
-      padding: 24px;
-      max-width: 600px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      max-width: 100%;
+      max-height: 60vh;
+    }
+
+    .result-panel {
+      margin-top: 12px;
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+
+    .result-panel p {
+      margin: 6px 0;
     }
   </style>
 </head>
+
 <body>
-  <div class="card">
-    <h1>Colony Counter</h1>
-    <p>细胞克隆形成实验半自动计数工具</p>
-    <p>🚧 工具开发中（v1.0），当前为 GitHub Pages 测试页面。</p>
-  </div>
-</body>
-</html>
+  <header>Colony Counter · 细胞克隆形成计数工具</header>
+
+  <div class="container">
+    <!-- 左侧图片列表 -->
+    <div class="sidebar">
+      <h3>图片列表</h3>
+      <ul class="image-list" id="imageList"></ul>
