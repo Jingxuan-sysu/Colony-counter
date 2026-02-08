@@ -5,7 +5,7 @@
   <title>Colony Counter</title>
 
   <!-- Excel 导出库 -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script src="https://docs.opencv.org/4.x/opencv.js"></script>
 
   <style>
     body {
@@ -220,23 +220,122 @@ console.log('Safari console test OK');
 
       XLSX.writeFile(wb, 'Colony_Count_Result.xlsx');
     }
-  </script>
-  <script>
-function analyzeColonies() {
+ function detectWells() {
   const src = cv.imread(canvas);
   let gray = new cv.Mat();
-  let blur = new cv.Mat();
-  let binary = new cv.Mat();
-
   cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-  cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
-  cv.threshold(
-    blur,
-    binary,
-    0,
-    255,
-    cv.THRESH_BINARY_INV + cv.THRESH_OTSU
+  cv.GaussianBlur(gray, gray, new cv.Size(9, 9), 1.5);
+
+  let circles = new cv.Mat();
+  let minR = Math.floor(canvas.width * 0.12);
+  let maxR = Math.floor(canvas.width * 0.35);
+
+  cv.HoughCircles(
+    gray,
+    circles,
+    cv.HOUGH_GRADIENT,
+    1,
+    minR * 1.2,
+    100,
+    30,
+    minR,
+    maxR
   );
+
+  let wells = [];
+  for (let i = 0; i < circles.cols; i++) {
+    let x = circles.data32F[i * 3];
+    let y = circles.data32F[i * 3 + 1];
+    let r = circles.data32F[i * 3 + 2];
+    wells.push({ x, y, r });
+  }
+
+  src.delete(); gray.delete(); circles.delete();
+  return wells;
+}
+
+function analyzeColonies() {
+  if (!cv || !cv.Mat) return;
+
+  drawImage(); // 确保 canvas 有图
+
+  const src = cv.imread(canvas);
+  let display = src.clone();
+
+  const wells = detectWells();
+
+  let single = 0;
+  let fusion = 0;
+
+  wells.forEach(well => {
+    // 创建孔 mask
+    let mask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+    cv.circle(
+      mask,
+      new cv.Point(well.x, well.y),
+      well.r * 0.95,
+      new cv.Scalar(255),
+      -1
+    );
+
+    // 灰度 + 二值
+    let gray = new cv.Mat();
+    let blur = new cv.Mat();
+    let binary = new cv.Mat();
+
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+    cv.threshold(
+      blur,
+      binary,
+      0,
+      255,
+      cv.THRESH_BINARY_INV + cv.THRESH_OTSU
+    );
+
+    cv.bitwise_and(binary, mask, binary);
+
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
+    cv.findContours(
+      binary,
+      contours,
+      hierarchy,
+      cv.RETR_EXTERNAL,
+      cv.CHAIN_APPROX_SIMPLE
+    );
+
+    for (let i = 0; i < contours.size(); i++) {
+      let cnt = contours.get(i);
+      let area = cv.contourArea(cnt);
+      let peri = cv.arcLength(cnt, true);
+      if (peri === 0 || area < 50) continue;
+
+      let circ = 4 * Math.PI * area / (peri * peri);
+
+      if (circ >= 0.75) {
+        single++;
+        cv.drawContours(display, contours, i, new cv.Scalar(0,255,0,255), 2);
+      } else {
+        fusion++;
+        cv.drawContours(display, contours, i, new cv.Scalar(255,0,0,255), 2);
+      }
+    }
+
+    // 清理
+    mask.delete(); gray.delete(); blur.delete();
+    binary.delete(); contours.delete(); hierarchy.delete();
+  });
+
+  cv.imshow(canvas, display);
+
+  document.getElementById('singleCount').textContent = single;
+  document.getElementById('fusionCount').textContent = fusion;
+  document.getElementById('totalCount').textContent = single + fusion;
+
+  src.delete(); display.delete();
+}
+
 
   // 形态学处理
   let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5));
