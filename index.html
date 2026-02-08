@@ -179,31 +179,22 @@ function detectWellsFromCanvas(canvas) {
 function analyzeColonies() {
   if (!cvReady) return;
 
-  drawImage();
-
   const src = cv.imread(canvas);
 
-  // 1️⃣ 转 HSV
-  let hsv = new cv.Mat();
-  cv.cvtColor(src, hsv, cv.COLOR_RGBA2HSV);
+  // 全白测试图
+  let white = new cv.Mat(
+    src.rows,
+    src.cols,
+    cv.CV_8UC4,
+    new cv.Scalar(255, 255, 255, 255)
+  );
 
-  // 2️⃣ 超宽松紫色范围（调试用）
-  let lower = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [100, 20, 20, 0]);
-  let upper = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [180, 255, 255, 255]);
+  cv.imshow(canvas, white);
 
-  let mask = new cv.Mat();
-  cv.inRange(hsv, lower, upper, mask);
-
-  // 3️⃣ 直接显示 mask（关键！）
-  cv.imshow(canvas, mask);
-
-  // 清理
   src.delete();
-  hsv.delete();
-  lower.delete();
-  upper.delete();
-  mask.delete();
+  white.delete();
 }
+
 
 </script>
 </body>
