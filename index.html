@@ -2,202 +2,57 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>6孔板克隆计数 - 增强识别版</title>
+    <title>6孔板克隆计数器 - 最终优化版</title>
     <style>
         :root { --accent: #27ae60; --primary: #2c3e50; }
-        body { font-family: system-ui, -apple-system, sans-serif; background: #f4f7f6; margin: 0; padding: 20px; color: var(--primary); }
-        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 5px 25px rgba(0,0,0,0.1); }
-        .main-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; margin-top: 20px; }
-        .sidebar { background: #f8f9fa; padding: 20px; border-radius: 10px; border: 1px solid #e1e4e8; }
-        .canvas-wrapper { position: relative; border: 2px solid #333; cursor: crosshair; background: #222; overflow: hidden; border-radius: 8px; }
-        canvas { display: block; max-width: 100%; height: auto; }
-        .btn { width: 100%; padding: 12px; margin-top: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-        .btn-primary { background: #3498db; color: white; }
-        .btn-switch { background: #e67e22; color: white; }
-        .label { font-weight: bold; font-size: 0.85em; display: block; margin: 15px 0 5px; color: #555; }
-        .stats { background: var(--primary); color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 15px; }
-        #status-tag { position: fixed; top: 10px; right: 10px; padding: 5px 15px; border-radius: 20px; font-size: 0.8em; background: #eee; z-index: 999; }
+        body { font-family: system-ui, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .main-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
+        .sidebar { background: #fff; padding: 20px; border-radius: 10px; border: 1px solid #ddd; }
+        .canvas-container { background: #333; border-radius: 8px; overflow: hidden; position: relative; min-height: 500px; }
+        canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; cursor: crosshair; }
+        .stats { background: var(--primary); color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px; }
+        .btn { width: 100%; padding: 12px; margin-bottom: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .btn-blue { background: #3498db; color: white; }
+        .btn-orange { background: #e67e22; color: white; }
+        .loading-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.9); display: flex; align-items: center; justify-content: center; z-index: 1000; flex-direction: column; }
+        .label-group { margin: 15px 0 5px; font-size: 0.9em; font-weight: bold; display: flex; justify-content: space-between; }
+        input[type="range"] { width: 100%; }
     </style>
 </head>
 <body>
 
-<div id="status-tag">⏳ 库加载中...</div>
+<div id="loader" class="loading-mask">
+    <div style="font-size: 1.5rem; margin-bottom: 10px;">🧪 正在启动实验算法库...</div>
+    <div id="load-status">正在连接高速节点 (unpkg)...</div>
+</div>
 
 <div class="container">
-    <div style="text-align:center">
-        <h2>🔬 高灵敏度细胞克隆计数器</h2>
-        <p>手动定孔后，如识别不到请切换“底色模式”或调整“灵敏度”</p>
-    </div>
-
     <div class="main-layout">
         <div class="sidebar">
             <div class="stats">
-                <small>当前检测计数</small>
-                <div style="font-size: 2.8rem; font-weight: bold;" id="totalCount">0</div>
+                <small>克隆计数结果</small>
+                <div style="font-size: 3rem;" id="totalCount">0</div>
             </div>
-
+            
             <input type="file" id="fileInput" accept="image/*" style="display:none">
-            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">1. 上传实验图片</button>
-            <button class="btn" style="background:#95a5a6; color:white;" onclick="resetPoints()">重选圆心点</button>
+            <button class="btn btn-blue" onclick="document.getElementById('fileInput').click()">1. 上传图片</button>
+            <button class="btn" onclick="resetPoints()">重选圆心</button>
             
             <hr>
-            
-            <button class="btn btn-switch" onclick="toggleMode()">模式切换：<span id="modeName">浅色底-深色集落</span></button>
-            
-            <span class="label">识别灵敏度 (阈值): <span id="v_thresh">120</span></span>
-            <input type="range" id="threshold" min="0" max="255" value="120">
+            <div class="label-group"><span>底色模式:</span></div>
+            <button class="btn btn-orange" id="modeBtn" onclick="toggleMode()">浅色背景-深色集落</button>
 
-            <span class="label">孔径半径: <span id="v_radius">200</span></span>
-            <input type="range" id="radiusRange" min="50" max="1200" value="200">
+            <div class="label-group"><span>识别灵敏度:</span><span id="v_thresh">127</span></div>
+            <input type="range" id="threshold" min="0" max="255" value="127">
 
-            <span class="label">最小集落面积 (像素): <span id="v_area">20</span></span>
-            <input type="range" id="minArea" min="2" max="500" value="20">
+            <div class="label-group"><span>孔径半径:</span><span id="v_radius">200</span></div>
+            <input type="range" id="radiusRange" min="50" max="1500" value="200">
 
-            <p style="font-size: 0.75rem; color: #666; margin-top: 20px;">
-                💡 <b>技巧：</b><br>
-                - 先点圆心，红圈出现后再调参。<br>
-                - 调整“孔径半径”使红圈略小于孔内径。
-            </p>
-        </div>
+            <div class="label-group"><span>最小集落面积:</span><span id="v_area">15</span></div>
+            <input type="range" id="minArea" min="1" max="500" value="15">
 
-        <div class="display-area">
-            <div class="canvas-wrapper">
-                <canvas id="canvasMain"></canvas>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-let srcMat = null;
-let points = [];
-let isDarkColony = true; // 默认深色集落（如结晶紫）
-
-const opencvUrl = 'https://docs.opencv.org/4.5.4/opencv.js';
-
-function toggleMode() {
-    isDarkColony = !isDarkColony;
-    document.getElementById('modeName').innerText = isDarkColony ? "浅色底-深色集落" : "深色底-浅色集落";
-    processImage();
-}
-
-// 加载 OpenCV
-const loadCV = () => {
-    const script = document.createElement('script');
-    script.src = opencvUrl;
-    script.async = true;
-    script.onload = () => {
-        const check = setInterval(() => {
-            if (typeof cv !== 'undefined' && cv.Mat) {
-                document.getElementById('status-tag').innerText = "✅ 算法库就绪";
-                document.getElementById('status-tag').style.background = "#d4edda";
-                clearInterval(check);
-            }
-        }, 100);
-    };
-    document.body.appendChild(script);
-};
-loadCV();
-
-const canvas = document.getElementById('canvasMain');
-const ctx = canvas.getContext('2d');
-
-document.getElementById('fileInput').onchange = (e) => {
-    if (e.target.files.length === 0) return;
-    const reader = new FileReader();
-    reader.onload = (f) => {
-        const img = new Image();
-        img.onload = () => {
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
-            if (srcMat) srcMat.delete();
-            srcMat = cv.imread(canvas);
-            resetPoints();
-        };
-        img.src = f.target.result;
-    };
-    reader.readAsDataURL(e.target.files[0]);
-};
-
-canvas.onclick = (e) => {
-    if (!srcMat) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-    if (points.length < 6) {
-        points.push({x, y});
-        processImage();
-    }
-};
-
-function resetPoints() {
-    points = [];
-    document.getElementById('totalCount').innerText = "0";
-    if(srcMat) cv.imshow('canvasMain', srcMat);
-}
-
-function processImage() {
-    if (!srcMat) return;
-    
-    let displayMat = srcMat.clone();
-    let gray = new cv.Mat();
-    cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
-
-    const r = parseInt(document.getElementById('radiusRange').value);
-    const t_val = parseInt(document.getElementById('threshold').value);
-    const a_val = parseInt(document.getElementById('minArea').value);
-    
-    document.getElementById('v_radius').innerText = r;
-    document.getElementById('v_thresh').innerText = t_val;
-    document.getElementById('v_area').innerText = a_val;
-
-    // 1. 创建孔位掩模
-    let mask = cv.Mat.zeros(srcMat.rows, srcMat.cols, cv.CV_8U);
-    points.forEach(p => {
-        cv.circle(mask, new cv.Point(p.x, p.y), r, [255, 255, 255, 255], -1);
-        cv.circle(displayMat, new cv.Point(p.x, p.y), r, [255, 0, 0, 255], 3);
-    });
-
-    // 2. 局部应用掩模
-    let maskedGray = new cv.Mat();
-    gray.copyTo(maskedGray, mask);
-
-    // 3. 核心识别算法
-    let thresh = new cv.Mat();
-    // 根据模式决定是正向还是反向阈值
-    let type = isDarkColony ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY;
-    cv.threshold(maskedGray, thresh, t_val, 255, type);
-
-    // 4. 形态学增强 (去掉极小噪点)
-    let M = cv.Mat.ones(3, 3, cv.CV_8U);
-    cv.morphologyEx(thresh, thresh, cv.MORPH_OPEN, M);
-
-    // 5. 轮廓检测
-    let contours = new cv.MatVector();
-    let hierarchy = new cv.Mat();
-    cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-    let count = 0;
-    for (let i = 0; i < contours.size(); ++i) {
-        let cnt = contours.get(i);
-        let area = cv.contourArea(cnt);
-        if (area > a_val) {
-            count++;
-            // 在原图绘制绿色边缘
-            cv.drawContours(displayMat, contours, i, [0, 255, 0, 255], 2);
-        }
-    }
-
-    cv.imshow('canvasMain', displayMat);
-    document.getElementById('totalCount').innerText = count;
-
-    // 清理显存
-    gray.delete(); mask.delete(); maskedGray.delete(); 
-    thresh.delete(); M.delete(); contours.delete(); hierarchy.delete(); displayMat.delete();
-}
-
-document.querySelectorAll('input[type=range]').forEach(el => el.oninput = processImage);
-</script>
-</body>
-</html>
+            <div style="margin-top:20px; font-size: 0.8em; color: #666; border-top: 1px solid #eee; pt: 10px;">
+                <b>识别不到？尝试：</b><br>
+                1. 切换底色模式<br>
+                2
