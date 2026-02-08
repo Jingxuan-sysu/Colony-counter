@@ -55,4 +55,137 @@
             <div style="margin-top:20px; font-size: 0.8em; color: #666; border-top: 1px solid #eee; pt: 10px;">
                 <b>识别不到？尝试：</b><br>
                 1. 切换底色模式<br>
-                2
+                2. 左右大幅滑动“灵敏度”<br>
+                3. 确认红圈已包围孔内区域
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="canvasMain"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+// 使用更稳定的 CDN
+const CV_URL = 'https://unpkg.com/opencv.js-pure@4.3.0/opencv.js';
+
+let srcMat = null;
+let points = [];
+let isDarkColony = true;
+
+// 脚本加载逻辑
+const script = document.createElement('script');
+script.src = CV_URL;
+script.async = true;
+script.onload = () => {
+    let check = setInterval(() => {
+        if (window.cv && cv.Mat) {
+            document.getElementById('loader').style.display = 'none';
+            clearInterval(check);
+        }
+    }, 200);
+};
+document.body.appendChild(script);
+
+const canvas = document.getElementById('canvasMain');
+const ctx = canvas.getContext('2d');
+
+document.getElementById('fileInput').onchange = (e) => {
+    if (!e.target.files[0]) return;
+    const img = new Image();
+    img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        if (srcMat) srcMat.delete();
+        srcMat = cv.imread(canvas);
+        resetPoints();
+    };
+    img.src = URL.createObjectURL(e.target.files[0]);
+};
+
+canvas.onclick = (e) => {
+    if (!srcMat) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    if (points.length < 6) {
+        points.push({x, y});
+        processImage();
+    }
+};
+
+function toggleMode() {
+    isDarkColony = !isDarkColony;
+    document.getElementById('modeBtn').innerText = isDarkColony ? "浅色背景-深色集落" : "深色背景-浅色集落";
+    processImage();
+}
+
+function resetPoints() {
+    points = [];
+    if(srcMat) cv.imshow('canvasMain', srcMat);
+    document.getElementById('totalCount').innerText = "0";
+}
+
+function processImage() {
+    if (!srcMat) return;
+    
+    let displayMat = srcMat.clone();
+    let gray = new cv.Mat();
+    cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
+
+    // --- 新增：自动对比度增强 (CLAHE) ---
+    // 这一步能显著提升模糊集落的识别率
+    let clahe = new cv.CLAHE(2.0, new cv.Size(8, 8));
+    clahe.apply(gray, gray);
+    clahe.delete();
+
+    const r = parseInt(document.getElementById('radiusRange').value);
+    const t_val = parseInt(document.getElementById('threshold').value);
+    const a_val = parseInt(document.getElementById('minArea').value);
+    
+    document.getElementById('v_radius').innerText = r;
+    document.getElementById('v_thresh').innerText = t_val;
+    document.getElementById('v_area').innerText = a_val;
+
+    let mask = cv.Mat.zeros(srcMat.rows, srcMat.cols, cv.CV_8U);
+    points.forEach(p => {
+        cv.circle(mask, new cv.Point(p.x, p.y), r, [255, 255, 255, 255], -1);
+        cv.circle(displayMat, new cv.Point(p.x, p.y), r, [255, 0, 0, 255], 4);
+    });
+
+    let maskedGray = new cv.Mat();
+    gray.copyTo(maskedGray, mask);
+
+    let thresh = new cv.Mat();
+    let type = isDarkColony ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY;
+    cv.threshold(maskedGray, thresh, t_val, 255, type);
+
+    let M = cv.Mat.ones(3, 3, cv.CV_8U);
+    cv.morphologyEx(thresh, thresh, cv.MORPH_OPEN, M);
+
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
+    cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    let count = 0;
+    for (let i = 0; i < contours.size(); ++i) {
+        let cnt = contours.get(i);
+        if (cv.contourArea(cnt) > a_val) {
+            count++;
+            cv.drawContours(displayMat, contours, i, [0, 255, 0, 255], 2);
+        }
+    }
+
+    cv.imshow('canvasMain', displayMat);
+    document.getElementById('totalCount').innerText = count;
+
+    gray.delete(); mask.delete(); maskedGray.delete(); thresh.delete(); 
+    M.delete(); contours.delete(); hierarchy.delete(); displayMat.delete();
+}
+
+document.querySelectorAll('input[type=range]').forEach(el => el.oninput = processImage);
+</script>
+</body>
+</html>
