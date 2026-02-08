@@ -5,7 +5,14 @@
   <title>Colony Counter</title>
 
   <!-- Excel 导出库 -->
+
+
 <script src="https://docs.opencv.org/4.x/opencv.js"></script>
+  let cvReady = false;
+  cv['onRuntimeInitialized'] = () => {
+  cvReady = true;
+  console.log('OpenCV is ready');
+};
 
   <style>
     body {
@@ -290,7 +297,10 @@ function getAnalysisMat() {
 }
 
 function analyzeColonies() {
-  if (!cv || !cv.Mat) return;
+  if (!cvReady) {
+    console.warn('OpenCV not ready yet');
+    return;
+  }
 const { mat: src, scale } = getAnalysisMat();
 let display = src.clone();
 
