@@ -1,8 +1,13 @@
 let isOpencvReady = false;
 let srcImage = null;
 let clonesData = []; 
-let wells = []; // 存储选区 {x, y, r}
-let appMode = 'detect'; // 'detect' 或 'edit_wells'
+let rois = []; // 存储所有手动框选的矩形区域 {x, y, w, h}
+let appMode = 'edit_points'; // 模式：'edit_points' (点选细胞) 或 'draw_roi' (框选区域)
+
+// 拖拽画框的状态变量
+let isDrawing = false;
+let startX = 0, startY = 0;
+let currentRoi = null;
 
 function onOpenCvReady() {
     isOpencvReady = true;
@@ -10,30 +15,29 @@ function onOpenCvReady() {
     document.getElementById('loadingMsg').style.color = "#10b981";
 }
 
-// 切换选位模式
-document.getElementById('toggleWellMode').addEventListener('click', function() {
-    appMode = (appMode === 'detect') ? 'edit_wells' : 'detect';
+// 切换框选模式
+document.getElementById('toggleRoiMode').addEventListener('click', function() {
+    appMode = (appMode === 'edit_points') ? 'draw_roi' : 'edit_points';
     const btn = this;
     const indicator = document.getElementById('modeDisplay');
-    if (appMode === 'edit_wells') {
-        btn.innerText = "退出选位模式";
+    if (appMode === 'draw_roi') {
+        btn.innerText = "退出 框选区域模式";
         btn.classList.add('active');
-        indicator.innerText = "当前模式：设置分析孔位";
+        indicator.innerText = "当前模式：鼠标拖拽框选区域";
         indicator.style.background = "#fee2e2";
         indicator.style.color = "#991b1b";
     } else {
-        btn.innerText = "开启选位模式";
+        btn.innerText = "开启 框选区域模式";
         btn.classList.remove('active');
-        indicator.innerText = "当前模式：分析计数";
+        indicator.innerText = "当前模式：点击修改/添加细胞";
         indicator.style.background = "#dcfce7";
         indicator.style.color = "#166534";
-        runAutoDetection(); // 退出时重新识别
     }
 });
 
-document.getElementById('clearWells').addEventListener('click', () => {
-    wells = [];
-    runAutoDetection();
+document.getElementById('clearRois').addEventListener('click', () => {
+    rois = [];
+    runAutoDetection(); // 清除区域后重新计算
 });
 
 document.getElementById('imageInput').addEventListener('change', function(e) {
@@ -53,11 +57,11 @@ document.getElementById('imageInput').addEventListener('change', function(e) {
     }
 });
 
-// 监听所有滑块更新
-['thresholdSlider', 'minAreaSlider', 'wellRadiusSlider'].forEach(id => {
+['thresholdSlider', 'minAreaSlider'].forEach(id => {
     document.getElementById(id).addEventListener('input', runAutoDetection);
 });
 
+// 核心逻辑：自动识别并过滤
 function runAutoDetection() {
     if (!srcImage) return;
     clonesData = [];
@@ -81,17 +85,22 @@ function runAutoDetection() {
         if (area >= minAreaVal) {
             let circle = cv.minEnclosingCircle(cnt);
             
-            // 【核心逻辑】：如果设置了 Wells，检查此点是否在任何一个 Well 内部
-            let isInsideAnyWell = wells.length === 0; // 若未设定选区，默认全选
-            for (let well of wells) {
-                let dist = Math.sqrt(Math.pow(circle.center.x - well.x, 2) + Math.pow(circle.center.y - well.y, 2));
-                if (dist <= well.r) {
-                    isInsideAnyWell = true;
-                    break;
+            // 检查克隆点是否在用户画的矩形框内 (如果没画框，默认不识别)
+            let isInsideAnyRoi = false;
+            if (rois.length > 0) {
+                for (let roi of rois) {
+                    if (circle.center.x >= roi.x && circle.center.x <= roi.x + roi.w &&
+                        circle.center.y >= roi.y && circle.center.y <= roi.y + roi.h) {
+                        isInsideAnyRoi = true;
+                        break;
+                    }
                 }
+            } else {
+                // 如果没有框选任何区域，默认识别全图 (如果你想严格要求必须框选才识别，把这里的 true 改为 false)
+                isInsideAnyRoi = true; 
             }
 
-            if (isInsideAnyWell) {
+            if (isInsideAnyRoi) {
                 clonesData.push({
                     x: circle.center.x, y: circle.center.y, r: circle.radius,
                     totalArea: area, count: 1, isManual: false
@@ -104,34 +113,50 @@ function runAutoDetection() {
 }
 
 function render() {
+    if (!srcImage) return;
     const canvas = document.getElementById('imageCanvas');
     canvas.width = srcImage.cols;
     canvas.height = srcImage.rows;
     cv.imshow('imageCanvas', srcImage);
     const ctx = canvas.getContext('2d');
 
-    // 绘制选区 (Wells)
-    wells.forEach(well => {
-        ctx.beginPath();
-        ctx.arc(well.x, well.y, well.r, 0, 2 * Math.PI);
-        ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)';
-        ctx.lineWidth = 5;
-        ctx.stroke();
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
-        ctx.fill();
+    // 绘制用户已框选的区域 (ROIs)
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)';
+    ctx.lineWidth = 3;
+    rois.forEach(roi => {
+        ctx.strokeRect(roi.x, roi.y, roi.w, roi.h);
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.05)';
+        ctx.fillRect(roi.x, roi.y, roi.w, roi.h);
     });
 
-    // 绘制克隆点
+    // 绘制正在拖拽中的虚线框
+    if (isDrawing && currentRoi) {
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = '#ef4444';
+        ctx.strokeRect(currentRoi.x, currentRoi.y, currentRoi.w, currentRoi.h);
+        ctx.setLineDash([]); // 恢复实线
+    }
+
+    // 绘制识别出的克隆点 (大幅加粗线条)
     let total = 0, areaSum = 0;
     clonesData.forEach(c => {
         ctx.beginPath();
-        ctx.arc(c.x, c.y, Math.max(c.r, 4), 0, 2 * Math.PI);
-        ctx.strokeStyle = c.count > 1 ? '#f97316' : '#22c55e';
-        ctx.lineWidth = 2;
+        // 如果半径太小，画一个最小可视圆
+        ctx.arc(c.x, c.y, Math.max(c.r, 6), 0, 2 * Math.PI);
+        
+        if (c.count > 1) {
+            ctx.strokeStyle = '#f97316'; // 橙色
+            ctx.lineWidth = 6;           // 融合克隆，更粗
+        } else {
+            ctx.strokeStyle = '#22c55e'; // 绿色
+            ctx.lineWidth = 4;           // 单克隆加粗
+        }
         ctx.stroke();
+        
         if (c.count > 1) {
             ctx.fillStyle = '#f97316';
-            ctx.fillText(c.count, c.x + 5, c.y - 5);
+            ctx.font = 'bold 24px Arial';
+            ctx.fillText(c.count, c.x + c.r + 5, c.y);
         }
         total += c.count;
         areaSum += c.totalArea;
@@ -141,19 +166,31 @@ function render() {
     document.getElementById('avgArea').innerText = total > 0 ? (areaSum / total).toFixed(1) : 0;
 }
 
-document.getElementById('imageCanvas').addEventListener('click', function(e) {
-    if (!srcImage) return;
-    const rect = this.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (this.width / rect.width);
-    const y = (e.clientY - rect.top) * (this.height / rect.height);
+// --------- 画布鼠标交互 (框选 与 点击修改) ---------
 
-    if (appMode === 'edit_wells') {
-        // 模式1：添加孔位选区
-        wells.push({ x, y, r: parseInt(document.getElementById('wellRadiusSlider').value) });
-        runAutoDetection();
+function getMousePos(canvas, evt) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+        x: (evt.clientX - rect.left) * scaleX,
+        y: (evt.clientY - rect.top) * scaleY
+    };
+}
+
+const canvas = document.getElementById('imageCanvas');
+
+canvas.addEventListener('mousedown', function(e) {
+    if (!srcImage) return;
+    const pos = getMousePos(canvas, e);
+
+    if (appMode === 'draw_roi') {
+        isDrawing = true;
+        startX = pos.x;
+        startY = pos.y;
     } else {
-        // 模式2：分析计数交互
-        let idx = clonesData.findIndex(c => Math.sqrt((c.x-x)**2 + (c.y-y)**2) < c.r + 10);
+        // 模式：点击修改或删除
+        let idx = clonesData.findIndex(c => Math.sqrt((c.x-pos.x)**2 + (c.y-pos.y)**2) < Math.max(c.r, 10) + 10);
         if (idx !== -1) {
             let n = prompt("输入该区域包含的细胞数 (0为删除):", clonesData[idx].count);
             if (n !== null) {
@@ -162,6 +199,30 @@ document.getElementById('imageCanvas').addEventListener('click', function(e) {
                 render();
             }
         }
+    }
+});
+
+canvas.addEventListener('mousemove', function(e) {
+    if (!isDrawing || appMode !== 'draw_roi') return;
+    const pos = getMousePos(canvas, e);
+    // 处理反向拖拽
+    currentRoi = {
+        x: Math.min(startX, pos.x),
+        y: Math.min(startY, pos.y),
+        w: Math.abs(pos.x - startX),
+        h: Math.abs(pos.y - startY)
+    };
+    render(); // 实时渲染拖拽框
+});
+
+canvas.addEventListener('mouseup', function(e) {
+    if (isDrawing && appMode === 'draw_roi') {
+        isDrawing = false;
+        if (currentRoi && currentRoi.w > 10 && currentRoi.h > 10) { // 忽略太小的误触点击
+            rois.push(currentRoi);
+        }
+        currentRoi = null;
+        runAutoDetection(); // 框选完成后重新执行识别
     }
 });
 
