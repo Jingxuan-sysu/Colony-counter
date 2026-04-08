@@ -1,13 +1,14 @@
 let isOpencvReady = false;
 let srcImage = null;
 let clonesData = []; 
-let rois = []; // 存储所有手动框选的矩形区域 {x, y, w, h}
-let appMode = 'edit_points'; // 模式：'edit_points' (点选细胞) 或 'draw_roi' (框选区域)
-
-// 拖拽画框的状态变量
+let rois = []; 
+let appMode = 'edit_points'; 
 let isDrawing = false;
 let startX = 0, startY = 0;
 let currentRoi = null;
+
+// 用于记录当前正在编辑的集落索引
+let editingCloneIndex = -1;
 
 function onOpenCvReady() {
     isOpencvReady = true;
@@ -15,7 +16,6 @@ function onOpenCvReady() {
     document.getElementById('loadingMsg').style.color = "#10b981";
 }
 
-// 切换框选模式
 document.getElementById('toggleRoiMode').addEventListener('click', function() {
     appMode = (appMode === 'edit_points') ? 'draw_roi' : 'edit_points';
     const btn = this;
@@ -23,13 +23,13 @@ document.getElementById('toggleRoiMode').addEventListener('click', function() {
     if (appMode === 'draw_roi') {
         btn.innerText = "退出 框选区域模式";
         btn.classList.add('active');
-        indicator.innerText = "当前模式：鼠标拖拽框选区域";
+        indicator.innerText = "当前模式：鼠标拖拽框选计数孔";
         indicator.style.background = "#fee2e2";
         indicator.style.color = "#991b1b";
     } else {
         btn.innerText = "开启 框选区域模式";
         btn.classList.remove('active');
-        indicator.innerText = "当前模式：点击修改/添加细胞";
+        indicator.innerText = "当前模式：点击集落进行数值修改";
         indicator.style.background = "#dcfce7";
         indicator.style.color = "#166534";
     }
@@ -37,7 +37,7 @@ document.getElementById('toggleRoiMode').addEventListener('click', function() {
 
 document.getElementById('clearRois').addEventListener('click', () => {
     rois = [];
-    runAutoDetection(); // 清除区域后重新计算
+    runAutoDetection(); 
 });
 
 document.getElementById('imageInput').addEventListener('change', function(e) {
@@ -57,61 +57,97 @@ document.getElementById('imageInput').addEventListener('change', function(e) {
     }
 });
 
-['thresholdSlider', 'minAreaSlider'].forEach(id => {
+// 监听所有滑块更新
+['colorTolerance', 'circularitySlider', 'minAreaSlider'].forEach(id => {
     document.getElementById(id).addEventListener('input', runAutoDetection);
 });
 
-// 核心逻辑：自动识别并过滤
+// --- 核心算法升级：HSV紫色提取 + 圆度计算 ---
 function runAutoDetection() {
     if (!srcImage) return;
     clonesData = [];
-    const thresholdVal = parseInt(document.getElementById('thresholdSlider').value);
+    
+    const tolerance = parseInt(document.getElementById('colorTolerance').value);
+    const minCircularity = parseInt(document.getElementById('circularitySlider').value) / 100.0;
     const minAreaVal = parseInt(document.getElementById('minAreaSlider').value);
 
-    let gray = new cv.Mat();
-    let blurred = new cv.Mat();
-    let binary = new cv.Mat();
+    let hsv = new cv.Mat();
+    let mask = new cv.Mat();
     let contours = new cv.MatVector();
     let hierarchy = new cv.Mat();
 
-    cv.cvtColor(srcImage, gray, cv.COLOR_RGBA2GRAY, 0);
-    cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-    cv.threshold(blurred, binary, thresholdVal, 255, cv.THRESH_BINARY_INV);
-    cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    try {
+        // 1. 将图像转换为 HSV 色彩空间
+        cv.cvtColor(srcImage, hsv, cv.COLOR_RGBA2RGB);
+        cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
 
-    for (let i = 0; i < contours.size(); ++i) {
-        let cnt = contours.get(i);
-        let area = cv.contourArea(cnt);
-        if (area >= minAreaVal) {
-            let circle = cv.minEnclosingCircle(cnt);
+        // 2. 结晶紫/紫色的 HSV 范围过滤
+        // OpenCv中 Hue 的范围是 0-180。紫色通常在 120-160 之间。
+        let lowerH = Math.max(0, 140 - tolerance);
+        let upperH = Math.min(180, 140 + tolerance);
+        
+        // 提取紫色：设置饱和度 S 和亮度 V 的最低阈值以排除纯黑/纯白背景
+        let low = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [lowerH, 30, 20, 0]);
+        let high = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [upperH, 255, 255, 255]);
+        
+        cv.inRange(hsv, low, high, mask);
+
+        // 形态学开运算去噪 (消除极小杂点)
+        let M = cv.Mat.ones(3, 3, cv.CV_8U);
+        cv.morphologyEx(mask, mask, cv.MORPH_OPEN, M);
+
+        // 3. 提取轮廓
+        cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+        for (let i = 0; i < contours.size(); ++i) {
+            let cnt = contours.get(i);
+            let area = cv.contourArea(cnt);
             
-            // 检查克隆点是否在用户画的矩形框内 (如果没画框，默认不识别)
-            let isInsideAnyRoi = false;
-            if (rois.length > 0) {
-                for (let roi of rois) {
-                    if (circle.center.x >= roi.x && circle.center.x <= roi.x + roi.w &&
-                        circle.center.y >= roi.y && circle.center.y <= roi.y + roi.h) {
-                        isInsideAnyRoi = true;
-                        break;
+            if (area >= minAreaVal) {
+                // 4. 计算圆度 (Circularity)
+                let perimeter = cv.arcLength(cnt, true);
+                let circularity = 0;
+                if (perimeter > 0) {
+                    circularity = (4 * Math.PI * area) / (perimeter * perimeter);
+                }
+
+                // 只有符合圆度要求的才算作标准克隆
+                if (circularity >= minCircularity) {
+                    let circle = cv.minEnclosingCircle(cnt);
+                    
+                    let isInsideAnyRoi = false;
+                    if (rois.length > 0) {
+                        for (let roi of rois) {
+                            if (circle.center.x >= roi.x && circle.center.x <= roi.x + roi.w &&
+                                circle.center.y >= roi.y && circle.center.y <= roi.y + roi.h) {
+                                isInsideAnyRoi = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        isInsideAnyRoi = true; 
+                    }
+
+                    if (isInsideAnyRoi) {
+                        clonesData.push({
+                            x: circle.center.x, y: circle.center.y, r: circle.radius,
+                            totalArea: area, count: 1, isManual: false
+                        });
                     }
                 }
-            } else {
-                // 如果没有框选任何区域，默认识别全图 (如果你想严格要求必须框选才识别，把这里的 true 改为 false)
-                isInsideAnyRoi = true; 
-            }
-
-            if (isInsideAnyRoi) {
-                clonesData.push({
-                    x: circle.center.x, y: circle.center.y, r: circle.radius,
-                    totalArea: area, count: 1, isManual: false
-                });
             }
         }
+    } catch (err) {
+        console.error("图像处理错误:", err);
+    } finally {
+        hsv.delete(); mask.delete(); contours.delete(); hierarchy.delete();
+        if(typeof M !== 'undefined') M.delete(); low.delete(); high.delete();
     }
-    gray.delete(); blurred.delete(); binary.delete(); contours.delete(); hierarchy.delete();
+    
     render();
 }
 
+// --- 渲染：红框加粗呈现 ---
 function render() {
     if (!srcImage) return;
     const canvas = document.getElementById('imageCanvas');
@@ -120,7 +156,7 @@ function render() {
     cv.imshow('imageCanvas', srcImage);
     const ctx = canvas.getContext('2d');
 
-    // 绘制用户已框选的区域 (ROIs)
+    // 绘制框选区域
     ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)';
     ctx.lineWidth = 3;
     rois.forEach(roi => {
@@ -129,34 +165,32 @@ function render() {
         ctx.fillRect(roi.x, roi.y, roi.w, roi.h);
     });
 
-    // 绘制正在拖拽中的虚线框
     if (isDrawing && currentRoi) {
         ctx.setLineDash([5, 5]);
         ctx.strokeStyle = '#ef4444';
         ctx.strokeRect(currentRoi.x, currentRoi.y, currentRoi.w, currentRoi.h);
-        ctx.setLineDash([]); // 恢复实线
+        ctx.setLineDash([]); 
     }
 
-    // 绘制识别出的克隆点 (大幅加粗线条)
+    // 绘制集落：全部采用高对比科研红 #E64B35，粗线条
     let total = 0, areaSum = 0;
     clonesData.forEach(c => {
         ctx.beginPath();
-        // 如果半径太小，画一个最小可视圆
-        ctx.arc(c.x, c.y, Math.max(c.r, 6), 0, 2 * Math.PI);
+        ctx.arc(c.x, c.y, Math.max(c.r, 8), 0, 2 * Math.PI);
         
-        if (c.count > 1) {
-            ctx.strokeStyle = '#f97316'; // 橙色
-            ctx.lineWidth = 6;           // 融合克隆，更粗
-        } else {
-            ctx.strokeStyle = '#22c55e'; // 绿色
-            ctx.lineWidth = 4;           // 单克隆加粗
-        }
+        ctx.strokeStyle = '#E64B35'; // 强烈的红色边框
+        ctx.lineWidth = c.count > 1 ? 6 : 4; // 融合集落线条更粗
         ctx.stroke();
         
+        // 如果是修改过的融合集落，显示显眼的数字标签
         if (c.count > 1) {
-            ctx.fillStyle = '#f97316';
-            ctx.font = 'bold 24px Arial';
+            ctx.fillStyle = '#E64B35';
+            ctx.font = 'bold 26px Arial';
             ctx.fillText(c.count, c.x + c.r + 5, c.y);
+            
+            // 给圈内加个轻微的底色区分
+            ctx.fillStyle = 'rgba(230, 75, 53, 0.2)';
+            ctx.fill();
         }
         total += c.count;
         areaSum += c.totalArea;
@@ -165,8 +199,6 @@ function render() {
     document.getElementById('totalCount').innerText = total;
     document.getElementById('avgArea').innerText = total > 0 ? (areaSum / total).toFixed(1) : 0;
 }
-
-// --------- 画布鼠标交互 (框选 与 点击修改) ---------
 
 function getMousePos(canvas, evt) {
     const rect = canvas.getBoundingClientRect();
@@ -189,15 +221,13 @@ canvas.addEventListener('mousedown', function(e) {
         startX = pos.x;
         startY = pos.y;
     } else {
-        // 模式：点击修改或删除
-        let idx = clonesData.findIndex(c => Math.sqrt((c.x-pos.x)**2 + (c.y-pos.y)**2) < Math.max(c.r, 10) + 10);
+        // --- 交互升级：触发修改弹窗 ---
+        let idx = clonesData.findIndex(c => Math.sqrt((c.x-pos.x)**2 + (c.y-pos.y)**2) < Math.max(c.r, 12) + 5);
         if (idx !== -1) {
-            let n = prompt("输入该区域包含的细胞数 (0为删除):", clonesData[idx].count);
-            if (n !== null) {
-                if (parseInt(n) === 0) clonesData.splice(idx, 1);
-                else clonesData[idx].count = parseInt(n);
-                render();
-            }
+            editingCloneIndex = idx;
+            document.getElementById('manualCountInput').value = clonesData[idx].count;
+            document.getElementById('editModal').style.display = 'flex';
+            setTimeout(() => document.getElementById('manualCountInput').focus(), 100);
         }
     }
 });
@@ -205,26 +235,54 @@ canvas.addEventListener('mousedown', function(e) {
 canvas.addEventListener('mousemove', function(e) {
     if (!isDrawing || appMode !== 'draw_roi') return;
     const pos = getMousePos(canvas, e);
-    // 处理反向拖拽
     currentRoi = {
         x: Math.min(startX, pos.x),
         y: Math.min(startY, pos.y),
         w: Math.abs(pos.x - startX),
         h: Math.abs(pos.y - startY)
     };
-    render(); // 实时渲染拖拽框
+    render(); 
 });
 
 canvas.addEventListener('mouseup', function(e) {
     if (isDrawing && appMode === 'draw_roi') {
         isDrawing = false;
-        if (currentRoi && currentRoi.w > 10 && currentRoi.h > 10) { // 忽略太小的误触点击
+        if (currentRoi && currentRoi.w > 10 && currentRoi.h > 10) { 
             rois.push(currentRoi);
         }
         currentRoi = null;
-        runAutoDetection(); // 框选完成后重新执行识别
+        runAutoDetection(); 
     }
 });
+
+// --- 弹窗保存/取消逻辑 ---
+document.getElementById('cancelEditBtn').addEventListener('click', () => {
+    document.getElementById('editModal').style.display = 'none';
+    editingCloneIndex = -1;
+});
+
+document.getElementById('saveEditBtn').addEventListener('click', () => {
+    if (editingCloneIndex !== -1) {
+        let val = parseInt(document.getElementById('manualCountInput').value);
+        if (!isNaN(val)) {
+            if (val === 0) {
+                clonesData.splice(editingCloneIndex, 1);
+            } else {
+                clonesData[editingCloneIndex].count = val;
+                clonesData[editingCloneIndex].isManual = true;
+            }
+            render();
+        }
+    }
+    document.getElementById('editModal').style.display = 'none';
+    editingCloneIndex = -1;
+});
+
+// 回车键快速保存
+document.getElementById('manualCountInput').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') document.getElementById('saveEditBtn').click();
+});
+
 
 document.getElementById('exportBtn').addEventListener('click', () => {
     const data = clonesData.map((c, i) => ({
