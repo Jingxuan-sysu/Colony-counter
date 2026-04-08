@@ -2,190 +2,80 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>6孔板克隆计数器 - 最终优化版</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>克隆/细胞计数与面积分析工具</title>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <style>
-        :root { --accent: #27ae60; --primary: #2c3e50; }
-        body { font-family: system-ui, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; }
-        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        .main-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
-        .sidebar { background: #fff; padding: 20px; border-radius: 10px; border: 1px solid #ddd; }
-        .canvas-container { background: #333; border-radius: 8px; overflow: hidden; position: relative; min-height: 500px; }
-        canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; cursor: crosshair; }
-        .stats { background: var(--primary); color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px; }
-        .btn { width: 100%; padding: 12px; margin-bottom: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-        .btn-blue { background: #3498db; color: white; }
-        .btn-orange { background: #e67e22; color: white; }
-        .loading-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.9); display: flex; align-items: center; justify-content: center; z-index: 1000; flex-direction: column; }
-        .label-group { margin: 15px 0 5px; font-size: 0.9em; font-weight: bold; display: flex; justify-content: space-between; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f5f7fa; color: #333; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .container { display: flex; gap: 20px; max-width: 1400px; margin: 0 auto; }
+        
+        /* 左侧图像工作区 */
+        .workspace { flex: 2; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); text-align: center;}
+        #imageCanvas { max-width: 100%; border: 1px solid #ccc; cursor: crosshair; }
+        
+        /* 右侧控制面板 */
+        .sidebar { flex: 1; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .control-group { margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee; }
+        .control-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        
         input[type="range"] { width: 100%; }
+        button { background-color: #4CAF50; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; width: 100%; margin-top: 10px;}
+        button:hover { background-color: #45a049; }
+        .btn-export { background-color: #2196F3; }
+        .btn-export:hover { background-color: #0b7dda; }
+
+        .stats-box { background: #f8f9fa; padding: 15px; border-radius: 4px; margin-top: 20px; }
+        .stats-box p { margin: 5px 0; font-size: 16px; }
+        .stats-number { font-weight: bold; color: #E91E63; font-size: 20px;}
+        
+        #loadingMsg { color: #f39c12; font-weight: bold; }
     </style>
 </head>
 <body>
 
-<div id="loader" class="loading-mask">
-    <div style="font-size: 1.5rem; margin-bottom: 10px;">🧪 正在启动实验算法库...</div>
-    <div id="load-status">正在连接高速节点 (unpkg)...</div>
-</div>
+    <div class="header">
+        <h2>克隆形成 & Transwell 自动计数工具</h2>
+        <p id="loadingMsg">正在加载 OpenCV.js 图像处理引擎，请稍候...</p>
+    </div>
 
-<div class="container">
-    <div class="main-layout">
-        <div class="sidebar">
-            <div class="stats">
-                <small>克隆计数结果</small>
-                <div style="font-size: 3rem;" id="totalCount">0</div>
-            </div>
-            
-            <input type="file" id="fileInput" accept="image/*" style="display:none">
-            <button class="btn btn-blue" onclick="document.getElementById('fileInput').click()">1. 上传图片</button>
-            <button class="btn" onclick="resetPoints()">重选圆心</button>
-            
-            <hr>
-            <div class="label-group"><span>底色模式:</span></div>
-            <button class="btn btn-orange" id="modeBtn" onclick="toggleMode()">浅色背景-深色集落</button>
-
-            <div class="label-group"><span>识别灵敏度:</span><span id="v_thresh">127</span></div>
-            <input type="range" id="threshold" min="0" max="255" value="127">
-
-            <div class="label-group"><span>孔径半径:</span><span id="v_radius">200</span></div>
-            <input type="range" id="radiusRange" min="50" max="1500" value="200">
-
-            <div class="label-group"><span>最小集落面积:</span><span id="v_area">15</span></div>
-            <input type="range" id="minArea" min="1" max="500" value="15">
-
-            <div style="margin-top:20px; font-size: 0.8em; color: #666; border-top: 1px solid #eee; pt: 10px;">
-                <b>识别不到？尝试：</b><br>
-                1. 切换底色模式<br>
-                2. 左右大幅滑动“灵敏度”<br>
-                3. 确认红圈已包围孔内区域
-            </div>
+    <div class="container">
+        <div class="workspace">
+            <input type="file" id="imageInput" accept="image/png, image/jpeg" style="display:none;">
+            <button onclick="document.getElementById('imageInput').click()" style="width: auto; margin-bottom: 15px;">上传实验图片 (JPG/PNG)</button>
+            <br>
+            <img id="rawImage" style="display:none;">
+            <canvas id="imageCanvas"></canvas>
         </div>
 
-        <div class="canvas-container">
-            <canvas id="canvasMain"></canvas>
+        <div class="sidebar">
+            <div class="control-group">
+                <label>1. 识别灵敏度 (阈值)</label>
+                <input type="range" id="thresholdSlider" min="0" max="255" value="120" disabled>
+                <small>调整此滑块以获得最佳自动识别效果</small>
+            </div>
+            
+            <div class="control-group">
+                <label>2. 最小克隆面积过滤 (剔除杂质)</label>
+                <input type="range" id="minAreaSlider" min="10" max="1000" value="50" disabled>
+            </div>
+
+            <div class="control-group">
+                <label>3. 交互提示</label>
+                <p style="font-size: 13px; color: #666; margin-top: 0;">鼠标左键点击识别框：<b>修改数量</b>（处理融合）<br>空白处点击：<b>新增计数点</b></p>
+            </div>
+
+            <div class="stats-box">
+                <p>当前总计数: <span id="totalCount" class="stats-number">0</span></p>
+                <p>平均面积: <span id="avgArea">0</span> px²</p>
+            </div>
+
+            <button class="btn-export" id="exportBtn" disabled>导出 Excel 数据</button>
         </div>
     </div>
-</div>
 
-<script>
-// 使用更稳定的 CDN
-const CV_URL = 'https://unpkg.com/opencv.js-pure@4.3.0/opencv.js';
-
-let srcMat = null;
-let points = [];
-let isDarkColony = true;
-
-// 脚本加载逻辑
-const script = document.createElement('script');
-script.src = CV_URL;
-script.async = true;
-script.onload = () => {
-    let check = setInterval(() => {
-        if (window.cv && cv.Mat) {
-            document.getElementById('loader').style.display = 'none';
-            clearInterval(check);
-        }
-    }, 200);
-};
-document.body.appendChild(script);
-
-const canvas = document.getElementById('canvasMain');
-const ctx = canvas.getContext('2d');
-
-document.getElementById('fileInput').onchange = (e) => {
-    if (!e.target.files[0]) return;
-    const img = new Image();
-    img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-        if (srcMat) srcMat.delete();
-        srcMat = cv.imread(canvas);
-        resetPoints();
-    };
-    img.src = URL.createObjectURL(e.target.files[0]);
-};
-
-canvas.onclick = (e) => {
-    if (!srcMat) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-    if (points.length < 6) {
-        points.push({x, y});
-        processImage();
-    }
-};
-
-function toggleMode() {
-    isDarkColony = !isDarkColony;
-    document.getElementById('modeBtn').innerText = isDarkColony ? "浅色背景-深色集落" : "深色背景-浅色集落";
-    processImage();
-}
-
-function resetPoints() {
-    points = [];
-    if(srcMat) cv.imshow('canvasMain', srcMat);
-    document.getElementById('totalCount').innerText = "0";
-}
-
-function processImage() {
-    if (!srcMat) return;
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     
-    let displayMat = srcMat.clone();
-    let gray = new cv.Mat();
-    cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
-
-    // --- 新增：自动对比度增强 (CLAHE) ---
-    // 这一步能显著提升模糊集落的识别率
-    let clahe = new cv.CLAHE(2.0, new cv.Size(8, 8));
-    clahe.apply(gray, gray);
-    clahe.delete();
-
-    const r = parseInt(document.getElementById('radiusRange').value);
-    const t_val = parseInt(document.getElementById('threshold').value);
-    const a_val = parseInt(document.getElementById('minArea').value);
-    
-    document.getElementById('v_radius').innerText = r;
-    document.getElementById('v_thresh').innerText = t_val;
-    document.getElementById('v_area').innerText = a_val;
-
-    let mask = cv.Mat.zeros(srcMat.rows, srcMat.cols, cv.CV_8U);
-    points.forEach(p => {
-        cv.circle(mask, new cv.Point(p.x, p.y), r, [255, 255, 255, 255], -1);
-        cv.circle(displayMat, new cv.Point(p.x, p.y), r, [255, 0, 0, 255], 4);
-    });
-
-    let maskedGray = new cv.Mat();
-    gray.copyTo(maskedGray, mask);
-
-    let thresh = new cv.Mat();
-    let type = isDarkColony ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY;
-    cv.threshold(maskedGray, thresh, t_val, 255, type);
-
-    let M = cv.Mat.ones(3, 3, cv.CV_8U);
-    cv.morphologyEx(thresh, thresh, cv.MORPH_OPEN, M);
-
-    let contours = new cv.MatVector();
-    let hierarchy = new cv.Mat();
-    cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-    let count = 0;
-    for (let i = 0; i < contours.size(); ++i) {
-        let cnt = contours.get(i);
-        if (cv.contourArea(cnt) > a_val) {
-            count++;
-            cv.drawContours(displayMat, contours, i, [0, 255, 0, 255], 2);
-        }
-    }
-
-    cv.imshow('canvasMain', displayMat);
-    document.getElementById('totalCount').innerText = count;
-
-    gray.delete(); mask.delete(); maskedGray.delete(); thresh.delete(); 
-    M.delete(); contours.delete(); hierarchy.delete(); displayMat.delete();
-}
-
-document.querySelectorAll('input[type=range]').forEach(el => el.oninput = processImage);
-</script>
+    <script src="script.js"></script>
 </body>
 </html>
