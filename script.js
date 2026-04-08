@@ -6,30 +6,33 @@ let appMode = 'edit_points';
 let isDrawing = false;
 let startX = 0, startY = 0;
 let currentRoi = null;
-
-// 用于记录当前正在编辑的集落索引
 let editingCloneIndex = -1;
+
+// 红色科研级配色
+const COLORS = {
+    PRIMARY_RED: '#E64B35',
+    ROI_BLUE: 'rgba(59, 130, 246, 0.7)',
+    HIGHLIGHT_BG: 'rgba(230, 75, 53, 0.25)'
+};
 
 function onOpenCvReady() {
     isOpencvReady = true;
-    document.getElementById('loadingMsg').innerText = "引擎就绪，请上传实验图片";
+    document.getElementById('loadingMsg').innerText = "分析引擎就绪";
     document.getElementById('loadingMsg').style.color = "#10b981";
 }
 
+// 切换框选模式
 document.getElementById('toggleRoiMode').addEventListener('click', function() {
     appMode = (appMode === 'edit_points') ? 'draw_roi' : 'edit_points';
-    const btn = this;
     const indicator = document.getElementById('modeDisplay');
     if (appMode === 'draw_roi') {
-        btn.innerText = "退出 框选区域模式";
-        btn.classList.add('active');
-        indicator.innerText = "当前模式：鼠标拖拽框选计数孔";
+        this.classList.add('active');
+        indicator.innerText = "当前模式：框选区域";
         indicator.style.background = "#fee2e2";
         indicator.style.color = "#991b1b";
     } else {
-        btn.innerText = "开启 框选区域模式";
-        btn.classList.remove('active');
-        indicator.innerText = "当前模式：点击集落进行数值修改";
+        this.classList.remove('active');
+        indicator.innerText = "当前模式：结果修正";
         indicator.style.background = "#dcfce7";
         indicator.style.color = "#166534";
     }
@@ -57,12 +60,11 @@ document.getElementById('imageInput').addEventListener('change', function(e) {
     }
 });
 
-// 监听所有滑块更新
 ['colorTolerance', 'circularitySlider', 'minAreaSlider'].forEach(id => {
     document.getElementById(id).addEventListener('input', runAutoDetection);
 });
 
-// --- 核心算法升级：HSV紫色提取 + 圆度计算 ---
+// --- 核心：识别与过滤逻辑 ---
 function runAutoDetection() {
     if (!srcImage) return;
     clonesData = [];
@@ -77,26 +79,21 @@ function runAutoDetection() {
     let hierarchy = new cv.Mat();
 
     try {
-        // 1. 将图像转换为 HSV 色彩空间
         cv.cvtColor(srcImage, hsv, cv.COLOR_RGBA2RGB);
         cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
 
-        // 2. 结晶紫/紫色的 HSV 范围过滤
-        // OpenCv中 Hue 的范围是 0-180。紫色通常在 120-160 之间。
+        // 紫色识别区间 (针对结晶紫)
         let lowerH = Math.max(0, 140 - tolerance);
         let upperH = Math.min(180, 140 + tolerance);
-        
-        // 提取紫色：设置饱和度 S 和亮度 V 的最低阈值以排除纯黑/纯白背景
-        let low = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [lowerH, 30, 20, 0]);
+        let low = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [lowerH, 40, 30, 0]);
         let high = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [upperH, 255, 255, 255]);
         
         cv.inRange(hsv, low, high, mask);
 
-        // 形态学开运算去噪 (消除极小杂点)
-        let M = cv.Mat.ones(3, 3, cv.CV_8U);
-        cv.morphologyEx(mask, mask, cv.MORPH_OPEN, M);
+        // 闭运算增强集落完整性
+        let M = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+        cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, M);
 
-        // 3. 提取轮廓
         cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
         for (let i = 0; i < contours.size(); ++i) {
@@ -104,28 +101,19 @@ function runAutoDetection() {
             let area = cv.contourArea(cnt);
             
             if (area >= minAreaVal) {
-                // 4. 计算圆度 (Circularity)
                 let perimeter = cv.arcLength(cnt, true);
-                let circularity = 0;
-                if (perimeter > 0) {
-                    circularity = (4 * Math.PI * area) / (perimeter * perimeter);
-                }
+                let circularity = perimeter > 0 ? (4 * Math.PI * area) / (perimeter * perimeter) : 0;
 
-                // 只有符合圆度要求的才算作标准克隆
                 if (circularity >= minCircularity) {
                     let circle = cv.minEnclosingCircle(cnt);
                     
-                    let isInsideAnyRoi = false;
-                    if (rois.length > 0) {
-                        for (let roi of rois) {
-                            if (circle.center.x >= roi.x && circle.center.x <= roi.x + roi.w &&
-                                circle.center.y >= roi.y && circle.center.y <= roi.y + roi.h) {
-                                isInsideAnyRoi = true;
-                                break;
-                            }
+                    let isInsideAnyRoi = rois.length === 0; 
+                    for (let roi of rois) {
+                        if (circle.center.x >= roi.x && circle.center.x <= roi.x + roi.w &&
+                            circle.center.y >= roi.y && circle.center.y <= roi.y + roi.h) {
+                            isInsideAnyRoi = true;
+                            break;
                         }
-                    } else {
-                        isInsideAnyRoi = true; 
                     }
 
                     if (isInsideAnyRoi) {
@@ -137,17 +125,14 @@ function runAutoDetection() {
                 }
             }
         }
-    } catch (err) {
-        console.error("图像处理错误:", err);
     } finally {
         hsv.delete(); mask.delete(); contours.delete(); hierarchy.delete();
-        if(typeof M !== 'undefined') M.delete(); low.delete(); high.delete();
+        low.delete(); high.delete();
     }
-    
     render();
 }
 
-// --- 渲染：红框加粗呈现 ---
+// --- 绘图与实时计数更新 ---
 function render() {
     if (!srcImage) return;
     const canvas = document.getElementById('imageCanvas');
@@ -156,50 +141,58 @@ function render() {
     cv.imshow('imageCanvas', srcImage);
     const ctx = canvas.getContext('2d');
 
-    // 绘制框选区域
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)';
-    ctx.lineWidth = 3;
+    // 绘制选区
+    ctx.strokeStyle = COLORS.ROI_BLUE;
+    ctx.lineWidth = 4;
     rois.forEach(roi => {
         ctx.strokeRect(roi.x, roi.y, roi.w, roi.h);
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.05)';
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
         ctx.fillRect(roi.x, roi.y, roi.w, roi.h);
     });
 
     if (isDrawing && currentRoi) {
-        ctx.setLineDash([5, 5]);
-        ctx.strokeStyle = '#ef4444';
+        ctx.setLineDash([10, 5]);
+        ctx.strokeStyle = COLORS.PRIMARY_RED;
         ctx.strokeRect(currentRoi.x, currentRoi.y, currentRoi.w, currentRoi.h);
         ctx.setLineDash([]); 
     }
 
-    // 绘制集落：全部采用高对比科研红 #E64B35，粗线条
-    let total = 0, areaSum = 0;
+    // 统计逻辑
+    let totalCountSum = 0;
+    let totalAreaSum = 0;
+
     clonesData.forEach(c => {
         ctx.beginPath();
-        ctx.arc(c.x, c.y, Math.max(c.r, 8), 0, 2 * Math.PI);
+        const drawRadius = Math.max(c.r, 10);
+        ctx.arc(c.x, c.y, drawRadius, 0, 2 * Math.PI);
         
-        ctx.strokeStyle = '#E64B35'; // 强烈的红色边框
-        ctx.lineWidth = c.count > 1 ? 6 : 4; // 融合集落线条更粗
+        ctx.strokeStyle = COLORS.PRIMARY_RED;
+        ctx.lineWidth = c.count > 1 ? 8 : 5; // 融合大集落使用特粗线
         ctx.stroke();
         
-        // 如果是修改过的融合集落，显示显眼的数字标签
         if (c.count > 1) {
-            ctx.fillStyle = '#E64B35';
-            ctx.font = 'bold 26px Arial';
-            ctx.fillText(c.count, c.x + c.r + 5, c.y);
-            
-            // 给圈内加个轻微的底色区分
-            ctx.fillStyle = 'rgba(230, 75, 53, 0.2)';
+            // 人工修正过的显示视觉增强
+            ctx.fillStyle = COLORS.HIGHLIGHT_BG;
             ctx.fill();
+            
+            ctx.fillStyle = COLORS.PRIMARY_RED;
+            ctx.font = 'bold 28px Arial';
+            ctx.shadowBlur = 4;
+            ctx.shadowColor = "white";
+            ctx.fillText(c.count, c.x + drawRadius + 5, c.y);
+            ctx.shadowBlur = 0;
         }
-        total += c.count;
-        areaSum += c.totalArea;
+        
+        totalCountSum += c.count;
+        totalAreaSum += c.totalArea;
     });
 
-    document.getElementById('totalCount').innerText = total;
-    document.getElementById('avgArea').innerText = total > 0 ? (areaSum / total).toFixed(1) : 0;
+    // 实时更新统计数值
+    document.getElementById('totalCount').innerText = totalCountSum;
+    document.getElementById('avgArea').innerText = totalCountSum > 0 ? (totalAreaSum / totalCountSum).toFixed(1) : 0;
 }
 
+// --- 交互处理 ---
 function getMousePos(canvas, evt) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -210,30 +203,27 @@ function getMousePos(canvas, evt) {
     };
 }
 
-const canvas = document.getElementById('imageCanvas');
-
 canvas.addEventListener('mousedown', function(e) {
     if (!srcImage) return;
     const pos = getMousePos(canvas, e);
 
     if (appMode === 'draw_roi') {
         isDrawing = true;
-        startX = pos.x;
-        startY = pos.y;
+        startX = pos.x; startY = pos.y;
     } else {
-        // --- 交互升级：触发修改弹窗 ---
-        let idx = clonesData.findIndex(c => Math.sqrt((c.x-pos.x)**2 + (c.y-pos.y)**2) < Math.max(c.r, 12) + 5);
+        // 判定点击了哪个集落
+        let idx = clonesData.findIndex(c => Math.sqrt((c.x-pos.x)**2 + (c.y-pos.y)**2) < Math.max(c.r, 15) + 10);
         if (idx !== -1) {
             editingCloneIndex = idx;
             document.getElementById('manualCountInput').value = clonesData[idx].count;
             document.getElementById('editModal').style.display = 'flex';
-            setTimeout(() => document.getElementById('manualCountInput').focus(), 100);
+            setTimeout(() => document.getElementById('manualCountInput').select(), 100);
         }
     }
 });
 
 canvas.addEventListener('mousemove', function(e) {
-    if (!isDrawing || appMode !== 'draw_roi') return;
+    if (!isDrawing) return;
     const pos = getMousePos(canvas, e);
     currentRoi = {
         x: Math.min(startX, pos.x),
@@ -244,52 +234,37 @@ canvas.addEventListener('mousemove', function(e) {
     render(); 
 });
 
-canvas.addEventListener('mouseup', function(e) {
-    if (isDrawing && appMode === 'draw_roi') {
+canvas.addEventListener('mouseup', function() {
+    if (isDrawing) {
         isDrawing = false;
-        if (currentRoi && currentRoi.w > 10 && currentRoi.h > 10) { 
-            rois.push(currentRoi);
-        }
+        if (currentRoi && currentRoi.w > 15) rois.push(currentRoi);
         currentRoi = null;
         runAutoDetection(); 
     }
 });
 
-// --- 弹窗保存/取消逻辑 ---
-document.getElementById('cancelEditBtn').addEventListener('click', () => {
-    document.getElementById('editModal').style.display = 'none';
-    editingCloneIndex = -1;
-});
-
-document.getElementById('saveEditBtn').addEventListener('click', () => {
+// --- 弹窗逻辑 ---
+document.getElementById('saveEditBtn').onclick = function() {
     if (editingCloneIndex !== -1) {
         let val = parseInt(document.getElementById('manualCountInput').value);
         if (!isNaN(val)) {
-            if (val === 0) {
-                clonesData.splice(editingCloneIndex, 1);
-            } else {
-                clonesData[editingCloneIndex].count = val;
-                clonesData[editingCloneIndex].isManual = true;
-            }
-            render();
+            if (val === 0) clonesData.splice(editingCloneIndex, 1);
+            else clonesData[editingCloneIndex].count = val;
+            render(); // 实时触发重绘与统计更新
         }
     }
     document.getElementById('editModal').style.display = 'none';
-    editingCloneIndex = -1;
-});
+};
 
-// 回车键快速保存
-document.getElementById('manualCountInput').addEventListener('keypress', function(e) {
-    if (e.key === 'Enter') document.getElementById('saveEditBtn').click();
-});
+document.getElementById('cancelEditBtn').onclick = () => document.getElementById('editModal').style.display = 'none';
 
-
-document.getElementById('exportBtn').addEventListener('click', () => {
+// Excel 导出
+document.getElementById('exportBtn').onclick = () => {
     const data = clonesData.map((c, i) => ({
-        "ID": i + 1, "细胞数": c.count, "面积(px)": c.totalArea.toFixed(1)
+        "序号": i + 1, "集落包含细胞数": c.count, "集落像素面积": c.totalArea.toFixed(1), "单个细胞平均像素": (c.totalArea / c.count).toFixed(1)
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Result");
-    XLSX.writeFile(wb, "Colony_Analysis.xlsx");
-});
+    XLSX.utils.book_append_sheet(wb, ws, "分析结果");
+    XLSX.writeFile(wb, `Colony_Report_${new Date().getTime()}.xlsx`);
+};
