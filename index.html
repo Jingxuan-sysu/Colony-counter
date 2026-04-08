@@ -3,26 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>科研级克隆计数工具 (支持手动框选ROI)</title>
+    <title>科研级克隆计数工具 (紫染克隆专版)</title>
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; color: #1a1a1a; }
         .container { display: flex; gap: 20px; max-width: 1400px; margin: 0 auto; }
         .workspace { flex: 2; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center; position: relative;}
-        /* 修改鼠标指针，提示用户可以交互 */
         #imageCanvas { max-width: 100%; border-radius: 4px; cursor: crosshair; background-color: #eee; }
         .sidebar { flex: 1; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); height: fit-content; }
         .control-group { margin-bottom: 20px; padding: 15px; border: 1px solid #eef0f2; border-radius: 8px; }
         .control-group h4 { margin-top: 0; margin-bottom: 12px; color: #2c3e50; }
-        label { display: block; font-size: 13px; margin-bottom: 8px; color: #64748b; }
+        label { display: block; font-size: 13px; margin-bottom: 8px; color: #64748b; font-weight: 500;}
         input[type="range"] { width: 100%; margin-bottom: 10px; }
         button { background-color: #3b82f6; color: white; padding: 10px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; width: 100%; transition: all 0.2s; }
         button:hover { background-color: #2563eb; }
         button.secondary { background-color: #64748b; margin-top: 8px; }
         button.active { background-color: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2); }
-        .stats-box { background: #f8fafc; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6; }
+        .stats-box { background: #f8fafc; padding: 20px; border-radius: 8px; border-left: 4px solid #E64B35; }
         #loadingMsg { text-align: center; font-weight: 500; margin-bottom: 15px; color: #f59e0b; }
         .mode-indicator { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-bottom: 10px; }
+        
+        /* 弹出层样式 */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+        .modal-content { background: white; padding: 25px; border-radius: 12px; width: 320px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+        .modal-content input { width: 80%; padding: 10px; margin: 15px 0; text-align: center; font-size: 20px; border: 2px solid #eef0f2; border-radius: 6px; outline: none; transition: border-color 0.2s;}
+        .modal-content input:focus { border-color: #E64B35; }
+        .modal-actions { display: flex; gap: 10px; justify-content: center; }
     </style>
 </head>
 <body>
@@ -31,7 +37,7 @@
 
 <div class="container">
     <div class="workspace">
-        <div id="modeDisplay" class="mode-indicator" style="background: #dcfce7; color: #166534;">当前模式：点击修改/添加细胞</div>
+        <div id="modeDisplay" class="mode-indicator" style="background: #dcfce7; color: #166534;">当前模式：点击集落进行数值修改</div>
         <input type="file" id="imageInput" accept="image/*" style="display:none;">
         <canvas id="imageCanvas"></canvas>
     </div>
@@ -46,24 +52,41 @@
             <h4>2. 选定计数区域 (ROI)</h4>
             <button id="toggleRoiMode" class="secondary">开启 框选区域模式</button>
             <button id="clearRois" class="secondary" style="background: #f1f5f9; color: #475569;">清除所有区域</button>
-            <p style="font-size: 11px; color: #94a3b8; margin-top: 8px;">* 开启后，在图上<b>按住鼠标拖拽</b>画出矩形框。只有框内的细胞会被计数。</p>
+            <p style="font-size: 11px; color: #94a3b8; margin-top: 8px;">* 在图上<b>按住鼠标拖拽</b>画出需计数的孔区域。</p>
         </div>
 
         <div class="control-group">
-            <h4>3. 计数参数</h4>
-            <label>识别灵敏度 (阈值)</label>
-            <input type="range" id="thresholdSlider" min="0" max="255" value="120">
+            <h4>3. 识别过滤参数 (针对紫染集落)</h4>
+            <label>紫颜色宽容度 (数值越大识别越广)</label>
+            <input type="range" id="colorTolerance" min="10" max="80" value="40">
+            
+            <label>形态圆度要求 (过滤不规则杂质)</label>
+            <input type="range" id="circularitySlider" min="10" max="100" value="60">
+            
             <label>最小面积过滤</label>
-            <input type="range" id="minAreaSlider" min="5" max="500" value="20">
+            <input type="range" id="minAreaSlider" min="5" max="500" value="30">
         </div>
 
         <div class="stats-box">
-            <p style="margin:0; font-size: 14px; color: #64748b;">总克隆数</p>
+            <p style="margin:0; font-size: 14px; color: #64748b;">总细胞/集落数</p>
             <div style="font-size: 32px; font-weight: 800; color: #1e293b;" id="totalCount">0</div>
             <p style="margin:10px 0 0 0; font-size: 13px;">平均面积: <span id="avgArea" style="font-weight: 600;">0</span> px²</p>
         </div>
 
-        <button id="exportBtn" style="margin-top: 20px; background: #10b981;">导出分析报告 (Excel)</button>
+        <button id="exportBtn" style="margin-top: 20px; background: #10b981;">导出 Excel 分析报告</button>
+    </div>
+</div>
+
+<div id="editModal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 style="margin-top:0; color:#1e293b;">修正集落数量</h3>
+        <p style="font-size:13px; color:#64748b; margin-bottom: 5px;">识别到多个融合？请直接输入该区域包含的实际细胞数。</p>
+        <p style="font-size:12px; color:#ef4444; margin-top: 0;">(输入 0 可将此点作为杂质删除)</p>
+        <input type="number" id="manualCountInput" min="0">
+        <div class="modal-actions">
+            <button id="cancelEditBtn" class="secondary" style="width:45%; margin-top:0;">取消</button>
+            <button id="saveEditBtn" style="width:45%; background:#E64B35; margin-top:0;">保存</button>
+        </div>
     </div>
 </div>
 
