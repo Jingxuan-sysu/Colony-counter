@@ -3,79 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>克隆/细胞计数与面积分析工具</title>
+    <title>科研级克隆计数工具 (支持多孔板选区)</title>
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f5f7fa; color: #333; }
-        .header { text-align: center; margin-bottom: 20px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; color: #1a1a1a; }
         .container { display: flex; gap: 20px; max-width: 1400px; margin: 0 auto; }
-        
-        /* 左侧图像工作区 */
-        .workspace { flex: 2; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); text-align: center;}
-        #imageCanvas { max-width: 100%; border: 1px solid #ccc; cursor: crosshair; }
-        
-        /* 右侧控制面板 */
-        .sidebar { flex: 1; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
-        .control-group { margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee; }
-        .control-group label { display: block; margin-bottom: 5px; font-weight: bold; }
-        
-        input[type="range"] { width: 100%; }
-        button { background-color: #4CAF50; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; width: 100%; margin-top: 10px;}
-        button:hover { background-color: #45a049; }
-        .btn-export { background-color: #2196F3; }
-        .btn-export:hover { background-color: #0b7dda; }
-
-        .stats-box { background: #f8f9fa; padding: 15px; border-radius: 4px; margin-top: 20px; }
-        .stats-box p { margin: 5px 0; font-size: 16px; }
-        .stats-number { font-weight: bold; color: #E91E63; font-size: 20px;}
-        
-        #loadingMsg { color: #f39c12; font-weight: bold; }
+        .workspace { flex: 2; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center; position: relative;}
+        #imageCanvas { max-width: 100%; border-radius: 4px; cursor: crosshair; background-color: #eee; }
+        .sidebar { flex: 1; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); height: fit-content; }
+        .control-group { margin-bottom: 20px; padding: 15px; border: 1px solid #eef0f2; border-radius: 8px; }
+        .control-group h4 { margin-top: 0; margin-bottom: 12px; color: #2c3e50; }
+        label { display: block; font-size: 13px; margin-bottom: 8px; color: #64748b; }
+        input[type="range"] { width: 100%; margin-bottom: 10px; }
+        button { background-color: #3b82f6; color: white; padding: 10px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; width: 100%; transition: all 0.2s; }
+        button:hover { background-color: #2563eb; }
+        button.secondary { background-color: #64748b; margin-top: 8px; }
+        button.active { background-color: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2); }
+        .stats-box { background: #f8fafc; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6; }
+        #loadingMsg { text-align: center; font-weight: 500; margin-bottom: 15px; color: #f59e0b; }
+        .mode-indicator { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-bottom: 10px; }
     </style>
 </head>
 <body>
 
-    <div class="header">
-        <h2>克隆形成 & Transwell 自动计数工具</h2>
-        <p id="loadingMsg">正在加载 OpenCV.js 图像处理引擎，请稍候...</p>
+<div id="loadingMsg">正在初始化 OpenCV 引擎...</div>
+
+<div class="container">
+    <div class="workspace">
+        <div id="modeDisplay" class="mode-indicator" style="background: #dcfce7; color: #166534;">当前模式：分析计数</div>
+        <input type="file" id="imageInput" accept="image/*" style="display:none;">
+        <canvas id="imageCanvas"></canvas>
     </div>
 
-    <div class="container">
-        <div class="workspace">
-            <input type="file" id="imageInput" accept="image/png, image/jpeg" style="display:none;">
-            <button onclick="document.getElementById('imageInput').click()" style="width: auto; margin-bottom: 15px;">上传实验图片 (JPG/PNG)</button>
-            <br>
-            <img id="rawImage" style="display:none;">
-            <canvas id="imageCanvas"></canvas>
+    <div class="sidebar">
+        <div class="control-group">
+            <h4>1. 图像上传</h4>
+            <button onclick="document.getElementById('imageInput').click()">上传实验图 (JPG/PNG)</button>
         </div>
 
-        <div class="sidebar">
-            <div class="control-group">
-                <label>1. 识别灵敏度 (阈值)</label>
-                <input type="range" id="thresholdSlider" min="0" max="255" value="120" disabled>
-                <small>调整此滑块以获得最佳自动识别效果</small>
-            </div>
-            
-            <div class="control-group">
-                <label>2. 最小克隆面积过滤 (剔除杂质)</label>
-                <input type="range" id="minAreaSlider" min="10" max="1000" value="50" disabled>
-            </div>
-
-            <div class="control-group">
-                <label>3. 交互提示</label>
-                <p style="font-size: 13px; color: #666; margin-top: 0;">鼠标左键点击识别框：<b>修改数量</b>（处理融合）<br>空白处点击：<b>新增计数点</b></p>
-            </div>
-
-            <div class="stats-box">
-                <p>当前总计数: <span id="totalCount" class="stats-number">0</span></p>
-                <p>平均面积: <span id="avgArea">0</span> px²</p>
-            </div>
-
-            <button class="btn-export" id="exportBtn" disabled>导出 Excel 数据</button>
+        <div class="control-group">
+            <h4>2. 选区设置 (针对六孔板)</h4>
+            <label>孔径大小 (Radius)</label>
+            <input type="range" id="wellRadiusSlider" min="50" max="1000" value="300">
+            <button id="toggleWellMode" class="secondary">开启/关闭 选位模式</button>
+            <button id="clearWells" class="secondary" style="background: #f1f5f9; color: #475569;">清除所有选区</button>
+            <p style="font-size: 11px; color: #94a3b8; margin-top: 8px;">* 选位模式下，点击图中位置可添加一个分析孔。</p>
         </div>
+
+        <div class="control-group">
+            <h4>3. 计数参数</h4>
+            <label>识别灵敏度 (阈值)</label>
+            <input type="range" id="thresholdSlider" min="0" max="255" value="120">
+            <label>最小面积过滤</label>
+            <input type="range" id="minAreaSlider" min="5" max="500" value="20">
+        </div>
+
+        <div class="stats-box">
+            <p style="margin:0; font-size: 14px; color: #64748b;">总克隆数</p>
+            <div style="font-size: 32px; font-weight: 800; color: #1e293b;" id="totalCount">0</div>
+            <p style="margin:10px 0 0 0; font-size: 13px;">平均面积: <span id="avgArea" style="font-weight: 600;">0</span> px²</p>
+        </div>
+
+        <button id="exportBtn" style="margin-top: 20px; background: #10b981;">导出分析报告 (Excel)</button>
     </div>
+</div>
 
-    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
-    
-    <script src="script.js"></script>
+<img id="rawImage" style="display:none;">
+<script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
+<script src="script.js"></script>
 </body>
 </html>
